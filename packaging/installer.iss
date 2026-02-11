@@ -40,6 +40,8 @@ Source: "..\scripts\start.bat"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\start.sh"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\adduser.bat"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\adduser.sh"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "..\scripts\setup_apikey.bat"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "..\scripts\setup_apikey.sh"; DestDir: "{app}\scripts"; Flags: ignoreversion
 
 ; 源码
 Source: "..\src\*"; DestDir: "{app}\src"; Flags: ignoreversion recursesubdirs
