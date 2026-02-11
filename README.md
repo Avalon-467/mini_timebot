@@ -83,10 +83,15 @@ DEEPSEEK_API_KEY=your_deepseek_api_key_here
 
 ### 3. 创建用户账号
 
-使用密码生成工具创建用户（交互式输入用户名和密码）：
+使用脚本创建用户（交互式输入用户名和密码）：
 
 ```bash
-python tools/gen_password.py
+# Linux / macOS（首次使用需赋予执行权限）
+chmod +x adduser.sh
+./adduser.sh
+
+# Windows
+adduser.bat
 ```
 
 该工具会将用户名和密码的 SHA-256 哈希写入 `config/users.json`。可多次运行以添加多个用户。
@@ -104,7 +109,8 @@ python tools/gen_password.py
 **一键启动（推荐）：**
 
 ```bash
-# Linux / macOS
+# Linux / macOS（首次使用需赋予执行权限）
+chmod +x start.sh
 ./start.sh
 
 # Windows
@@ -184,6 +190,8 @@ mini_timebot/
 ├── requirements.txt
 ├── start.sh               # 一键启动脚本 (Linux / macOS)
 ├── start.bat              # 一键启动脚本 (Windows)
+├── adduser.sh             # 添加用户脚本 (Linux / macOS)
+├── adduser.bat            # 添加用户脚本 (Windows)
 ├── config/
 │   ├── .env               # 环境变量配置（需自行创建，不纳入版本控制）
 │   ├── users.json         # 用户名-密码哈希（需用 gen_password.py 生成，不纳入版本控制）
