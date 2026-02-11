@@ -1,0 +1,15 @@
+flask
+requests
+fastapi
+uvicorn
+pydantic
+langgraph
+langchain-deepseek
+langchain-core
+langchain-mcp-adapters
+python-dotenv
+httpx
+mcp
+apscheduler
+aiosqlite
+langgraph-checkpoint-sqlite

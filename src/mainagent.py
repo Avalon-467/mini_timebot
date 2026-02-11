@@ -114,8 +114,8 @@ async def lifespan(app: FastAPI):
         # 注意：这里我们手动指定 python 解释器和脚本路径
         client = MultiServerMCPClient({
             "scheduler_service": {
-                "command": "python", # 动态获取当前的 python.exe
-                "args": ["mcp_scheduler.py"],
+                "command": "python",
+                "args": [os.path.join(current_dir, "mcp_scheduler.py")],
                 "transport": "stdio"
             }
         })
