@@ -13,3 +13,4 @@ mcp
 apscheduler
 aiosqlite
 langgraph-checkpoint-sqlite
+ddgs

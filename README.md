@@ -18,7 +18,8 @@ mainagent.py (FastAPI + LangGraph)  ── 核心 AI Agent，集成 DeepSeek LLM
     ├── mcp_scheduler.py (FastMCP)  ── MCP 工具服务，暴露闹钟管理工具
     │       │  HTTP :8001
     │       ▼
-    └── time.py (FastAPI + APScheduler)  ── 定时调度中心，管理 cron 任务
+    ├── time.py (FastAPI + APScheduler)  ── 定时调度中心，管理 cron 任务
+    └── mcp_search.py (FastMCP)    ── MCP 搜索服务，提供联网搜索（DuckDuckGo）
 ```
 
 ### 服务说明
@@ -28,6 +29,7 @@ mainagent.py (FastAPI + LangGraph)  ── 核心 AI Agent，集成 DeepSeek LLM
 | `src/front.py` | 9000 | Flask Web UI，提供聊天界面并代理请求到 Agent |
 | `src/mainagent.py` | 8000 | 核心 AI Agent（LangGraph + DeepSeek），管理对话与工具调用 |
 | `src/mcp_scheduler.py` | - | MCP 工具服务（作为 Agent 子进程启动），提供 add_alarm / list_alarms / delete_alarm |
+| `src/mcp_search.py` | - | MCP 搜索服务（作为 Agent 子进程启动），提供 web_search / web_news |
 | `src/time.py` | 8001 | 定时任务调度中心（APScheduler），任务到期时回调 Agent |
 | `test/chat.py` | - | 命令行测试客户端 |
 
@@ -93,7 +95,8 @@ mini_timebot/
 ├── src/
 │   ├── front.py           # 前端 Web UI
 │   ├── mainagent.py       # 核心 AI Agent
-│   ├── mcp_scheduler.py   # MCP 工具服务
+│   ├── mcp_scheduler.py   # MCP 工具服务（定时任务）
+│   ├── mcp_search.py      # MCP 搜索服务（联网搜索）
 │   └── time.py            # 定时任务调度中心
 └── test/
     ├── chat.py            # 命令行测试客户端

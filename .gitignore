@@ -10,7 +10,7 @@ __pycache__/
 config/.env
 
 # 运行时数据库
-data/agent_memory.db
+data
 
 # IDE
 .vscode/

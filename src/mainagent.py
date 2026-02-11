@@ -81,7 +81,7 @@ async def call_model(state: State):
     llm=app.state.sharedllm
     
     # 基础系统提示词
-    base_prompt = "你是一个专业的智能助理。"
+    base_prompt = "你是一个专业的智能助理，具备定时任务管理和联网搜索能力。当用户询问实时信息、新闻或需要查询资料时，请主动使用搜索工具。"
     
     # 针对系统触发（外部定时）的特殊逻辑
     if state.get("trigger_source") == "system":
@@ -116,6 +116,11 @@ async def lifespan(app: FastAPI):
             "scheduler_service": {
                 "command": "python",
                 "args": [os.path.join(current_dir, "mcp_scheduler.py")],
+                "transport": "stdio"
+            },
+            "search_service": {
+                "command": "python",
+                "args": [os.path.join(current_dir, "mcp_search.py")],
                 "transport": "stdio"
             }
         })
