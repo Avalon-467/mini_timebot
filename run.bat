@@ -22,4 +22,8 @@ if /i "%answer%"=="y" (
 
 echo.
 echo ========== 3/3 启动服务 ==========
+
+:: 延迟 8 秒后自动打开浏览器
+start "" cmd /c "timeout /t 8 /nobreak >nul && start http://127.0.0.1:9000"
+
 call scripts\start.bat
