@@ -1,4 +1,5 @@
 import os
+import copy
 import asyncio
 from datetime import datetime
 from typing import Annotated, TypedDict, Optional
@@ -16,6 +17,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 # 模型相关
 from langchain_deepseek import ChatDeepSeek
 from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.prebuilt import ToolNode, tools_condition
 
@@ -33,6 +35,36 @@ db_path = os.path.join(root_dir, "data", "agent_memory.db")
 
 # 加载配置
 load_dotenv(dotenv_path=env_path)
+
+# 文件管理工具名称集合（需要自动注入 username 的工具）
+FILE_TOOLS = {"list_files", "read_file", "write_file", "append_file", "delete_file"}
+
+
+class UserAwareToolNode:
+    """
+    自定义工具节点：从 RunnableConfig 中读取 thread_id，
+    自动注入为文件管理工具的 username 参数。
+    LLM 不需要传 username，由 config.thread_id 自动提供。
+    """
+    def __init__(self, tools):
+        self.tool_node = ToolNode(tools)
+
+    async def __call__(self, state, config: RunnableConfig):
+        thread_id = config.get("configurable", {}).get("thread_id", "anonymous")
+
+        last_message = state["messages"][-1]
+        if not hasattr(last_message, "tool_calls") or not last_message.tool_calls:
+            return {"messages": []}
+
+        # 深拷贝并注入 username
+        modified_message = copy.deepcopy(last_message)
+        for tc in modified_message.tool_calls:
+            if tc["name"] in FILE_TOOLS:
+                tc["args"]["username"] = thread_id
+
+        modified_state = {**state, "messages": state["messages"][:-1] + [modified_message]}
+        return await self.tool_node.ainvoke(modified_state, config)
+
 
 # --- 1. 定义状态 (State) ---
 class State(TypedDict):
@@ -81,7 +113,14 @@ async def call_model(state: State):
     llm=app.state.sharedllm
     
     # 基础系统提示词
-    base_prompt = "你是一个专业的智能助理，具备定时任务管理和联网搜索能力。当用户询问实时信息、新闻或需要查询资料时，请主动使用搜索工具。"
+    base_prompt = (
+        "你是一个专业的智能助理，具备以下能力：\n"
+        "1. 定时任务管理：可以为用户设置、查看和删除闹钟/定时任务。\n"
+        "2. 联网搜索：当用户询问实时信息、新闻或需要查询资料时，请主动使用搜索工具。\n"
+        "3. 文件管理：可以为用户创建、读取、追加、删除和列出文件。"
+        "调用文件管理工具（list_files, read_file, write_file, append_file, delete_file）时，"
+        "username 参数由系统自动注入，你不需要也不应该提供该参数。\n"
+    )
     
     # 针对系统触发（外部定时）的特殊逻辑
     if state.get("trigger_source") == "system":
@@ -122,6 +161,11 @@ async def lifespan(app: FastAPI):
                 "command": "python",
                 "args": [os.path.join(current_dir, "mcp_search.py")],
                 "transport": "stdio"
+            },
+            "file_service": {
+                "command": "python",
+                "args": [os.path.join(current_dir, "mcp_filemanager.py")],
+                "transport": "stdio"
             }
         })
 
@@ -139,7 +183,7 @@ async def lifespan(app: FastAPI):
 
         # 添加节点
         workflow.add_node("chatbot", call_model)
-        workflow.add_node("tools", ToolNode(tools)) # 专门执行工具的节点
+        workflow.add_node("tools", UserAwareToolNode(tools)) # 自动注入 username 的工具节点
 
         # 设置起点
         workflow.add_edge(START, "chatbot")

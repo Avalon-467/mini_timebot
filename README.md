@@ -19,7 +19,8 @@ mainagent.py (FastAPI + LangGraph)  ── 核心 AI Agent，集成 DeepSeek LLM
     │       │  HTTP :8001
     │       ▼
     ├── time.py (FastAPI + APScheduler)  ── 定时调度中心，管理 cron 任务
-    └── mcp_search.py (FastMCP)    ── MCP 搜索服务，提供联网搜索（DuckDuckGo）
+    ├── mcp_search.py (FastMCP)    ── MCP 搜索服务，提供联网搜索（DuckDuckGo）
+    └── mcp_filemanager.py (FastMCP) ── MCP 文件服务，提供用户文件管理
 ```
 
 ### 服务说明
@@ -30,6 +31,7 @@ mainagent.py (FastAPI + LangGraph)  ── 核心 AI Agent，集成 DeepSeek LLM
 | `src/mainagent.py` | 8000 | 核心 AI Agent（LangGraph + DeepSeek），管理对话与工具调用 |
 | `src/mcp_scheduler.py` | - | MCP 工具服务（作为 Agent 子进程启动），提供 add_alarm / list_alarms / delete_alarm |
 | `src/mcp_search.py` | - | MCP 搜索服务（作为 Agent 子进程启动），提供 web_search / web_news |
+| `src/mcp_filemanager.py` | - | MCP 文件服务（作为 Agent 子进程启动），提供 list_files / read_file / write_file / append_file / delete_file |
 | `src/time.py` | 8001 | 定时任务调度中心（APScheduler），任务到期时回调 Agent |
 | `test/chat.py` | - | 命令行测试客户端 |
 
@@ -91,12 +93,15 @@ mini_timebot/
 ├── config/
 │   └── .env               # 环境变量配置（需自行创建，不纳入版本控制）
 ├── data/
-│   └── agent_memory.db    # Agent 对话记忆数据库（运行时自动生成）
+│   ├── agent_memory.db    # Agent 对话记忆数据库（运行时自动生成）
+│   └── user_files/        # 用户文件存储目录（按用户名隔离，运行时自动生成）
+│       └── <username>/    # 各用户的独立文件空间
 ├── src/
 │   ├── front.py           # 前端 Web UI
 │   ├── mainagent.py       # 核心 AI Agent
 │   ├── mcp_scheduler.py   # MCP 工具服务（定时任务）
 │   ├── mcp_search.py      # MCP 搜索服务（联网搜索）
+│   ├── mcp_filemanager.py # MCP 文件服务（用户文件管理）
 │   └── time.py            # 定时任务调度中心
 └── test/
     ├── chat.py            # 命令行测试客户端
@@ -118,6 +123,21 @@ DEEPSEEK_API_KEY=your_deepseek_api_key_here
 **`data/`** — 运行时数据目录
 
 - `agent_memory.db`：SQLite 数据库，由 LangGraph 的 `AsyncSqliteSaver` 自动创建，用于持久化对话历史。包含 `checkpoints` 和 `writes` 两张表，以 `thread_id`（用户 ID）区分不同用户的对话记录。
+- `user_files/`：用户文件存储目录，按用户名（`thread_id`）自动创建子目录，实现用户间文件隔离。
+
+**文件管理机制**
+
+Agent 通过 `mcp_filemanager.py` 提供文件管理能力，支持 5 个操作：
+
+| 工具 | 说明 |
+|------|------|
+| `list_files` | 列出当前用户的所有文件 |
+| `read_file` | 读取指定文件内容 |
+| `write_file` | 创建或覆盖写入文件 |
+| `append_file` | 向文件末尾追加内容 |
+| `delete_file` | 删除指定文件 |
+
+用户身份通过 `UserAwareToolNode` 自动注入：LLM 调用工具时不需要传递 `username` 参数，系统从 LangGraph 的 `config.thread_id` 中读取用户 ID 并自动填充，确保用户只能操作自己的文件且无法伪造身份。
 
 **`test/`** — 测试与辅助工具
 
