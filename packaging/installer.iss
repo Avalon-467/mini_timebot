@@ -20,9 +20,9 @@ Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.i
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-; 安装时弹出的交互选项
-Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "添加快捷方式到："; Flags: checked
-Name: "startmenu"; Description: "创建开始菜单快捷方式"; GroupDescription: "添加快捷方式到："; Flags: checked
+; checked 是默认状态，不需要写 flag。如果不想要默认勾选，才加 unchecked
+Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "添加快捷方式到："; Flags: 
+Name: "startmenu"; Description: "创建开始菜单快捷方式"; GroupDescription: "添加快捷方式到："; Flags: 
 Name: "taskbar"; Description: "固定到任务栏"; GroupDescription: "添加快捷方式到："; Flags: unchecked
 
 [Files]
