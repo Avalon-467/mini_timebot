@@ -223,7 +223,10 @@ mini_timebot/
 │   ├── start.sh               # 一键启动 (Linux / macOS)
 │   ├── start.bat              # 一键启动 (Windows)
 │   ├── adduser.sh             # 添加用户 (Linux / macOS)
-│   └── adduser.bat            # 添加用户 (Windows)
+│   ├── adduser.bat            # 添加用户 (Windows)
+│   ├── launcher.py            # exe 启动器源码（调用 run.bat）
+│   ├── build.py               # PyInstaller 打包脚本
+│   └── installer.iss          # Inno Setup 安装包脚本
 ├── config/
 │   ├── .env               # 环境变量配置（需自行创建，不纳入版本控制）
 │   ├── requirements.txt   # Python 依赖列表
@@ -293,6 +296,32 @@ Agent 通过 `mcp_filemanager.py` 提供文件管理能力，支持 5 个操作�
 |------|------|------|
 | `chat.py` | 命令行交互式聊天客户端，通过 HTTP 向 Agent 发送请求 | `python test/chat.py` |
 | `view_history.py` | 读取 `agent_memory.db`，查看历史聊天记录 | `python test/view_history.py [--user USER_ID] [--limit N]` |
+
+## 打包发布（Windows 安装包）
+
+将项目打包为 Windows 安装包，用户双击桌面快捷方式即可运行（exe 本质是 `run.bat` 的启动器壳）。
+
+### 打包步骤
+
+```bash
+# 1. 安装 PyInstaller
+pip install pyinstaller
+
+# 2. 打包 exe（生成 MiniTimeBot.exe 到项目根目录）
+python scripts/build.py
+
+# 3. 制作安装包（可选）
+#    用 Inno Setup 打开 scripts/installer.iss，点击编译
+#    生成 dist/MiniTimeBot_Setup_1.0.0.exe
+```
+
+安装包功能：
+- 创建桌面快捷方式和开始菜单项
+- 包含完整源码、脚本和配置模板
+- 安装后提示配置 API Key
+- 支持卸载
+
+> exe 仅作为 `run.bat` 的快捷方式入口，不改变任何业务逻辑。所有源码保持 `.py` 格式，可随时修改。
 
 ## 技术栈
 

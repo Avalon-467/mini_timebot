@@ -28,3 +28,9 @@ pyrightconfig.json
 # 系统文件
 .DS_Store
 Thumbs.db
+
+# 打包产物
+build/
+dist/
+*.spec
+MiniTimeBot.exe
