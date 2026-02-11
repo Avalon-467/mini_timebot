@@ -37,11 +37,41 @@ mainagent.py (FastAPI + LangGraph)  ── 核心 AI Agent，集成 DeepSeek LLM
 
 ## 快速开始
 
-### 1. 安装依赖
+### 1. 环境配置（推荐使用 uv）
+
+推荐使用 [uv](https://docs.astral.sh/uv/) 管理 Python 环境，比 pip 快 10-100 倍。
+
+**安装 uv：**
 
 ```bash
-pip install -r requirements.txt
+# Linux / macOS
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
+
+安装后重启终端，确认 `uv --version` 可用。
+
+**创建虚拟环境并安装依赖：**
+
+```bash
+# 创建虚拟环境（Python 3.11+）
+uv venv .venv --python 3.11
+
+# 激活虚拟环境
+# Linux / macOS
+source .venv/bin/activate
+# Windows (PowerShell)
+.venv\Scripts\Activate.ps1
+# Windows (CMD)
+.venv\Scripts\activate.bat
+
+# 安装依赖
+uv pip install -r requirements.txt
+```
+
+> 也可以用传统方式：`python -m venv .venv` + `pip install -r requirements.txt`
 
 ### 2. 配置环境变量
 
@@ -74,10 +104,14 @@ python tools/gen_password.py
 **一键启动（推荐）：**
 
 ```bash
+# Linux / macOS
 ./start.sh
+
+# Windows
+start.bat
 ```
 
-按 `Ctrl+C` 即可停止所有服务。
+Linux 按 `Ctrl+C` 停止所有服务；Windows 按任意键停止。
 
 **手动分别启动**（需 3 个终端）：
 
@@ -148,7 +182,8 @@ mini_timebot/
 ├── LICENSE
 ├── README.md
 ├── requirements.txt
-├── start.sh               # 一键启动脚本
+├── start.sh               # 一键启动脚本 (Linux / macOS)
+├── start.bat              # 一键启动脚本 (Windows)
 ├── config/
 │   ├── .env               # 环境变量配置（需自行创建，不纳入版本控制）
 │   ├── users.json         # 用户名-密码哈希（需用 gen_password.py 生成，不纳入版本控制）
