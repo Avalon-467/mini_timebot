@@ -19,6 +19,12 @@ WizardStyle=modern
 Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+[Tasks]
+; 安装时弹出的交互选项
+Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "添加快捷方式到："; Flags: checked
+Name: "startmenu"; Description: "创建开始菜单快捷方式"; GroupDescription: "添加快捷方式到："; Flags: checked
+Name: "taskbar"; Description: "固定到任务栏"; GroupDescription: "添加快捷方式到："; Flags: unchecked
+
 [Files]
 ; 主程序 exe（放在根目录）
 Source: "..\MiniTimeBot.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -56,14 +62,19 @@ Name: "{app}\data\user_files"
 Name: "{app}\config"
 
 [Icons]
-; 桌面快捷方式
-Name: "{autodesktop}\MiniTimeBot"; Filename: "{app}\MiniTimeBot.exe"; WorkingDir: "{app}"
-; 开始菜单快捷方式
-Name: "{group}\MiniTimeBot"; Filename: "{app}\MiniTimeBot.exe"; WorkingDir: "{app}"
-Name: "{group}\卸载 MiniTimeBot"; Filename: "{uninstallexe}"
+; 桌面快捷方式（用户勾选时才创建）
+Name: "{autodesktop}\MiniTimeBot"; Filename: "{app}\MiniTimeBot.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+; 开始菜单快捷方式（用户勾选时才创建）
+Name: "{group}\MiniTimeBot"; Filename: "{app}\MiniTimeBot.exe"; WorkingDir: "{app}"; Tasks: startmenu
+Name: "{group}\卸载 MiniTimeBot"; Filename: "{uninstallexe}"; Tasks: startmenu
 
 [Run]
-; 安装完成后提示
+; 固定到任务栏（用户勾选时执行）
+Filename: "powershell.exe"; \
+    Parameters: "-Command ""$s=(New-Object -COM WScript.Shell).CreateShortcut('{app}\MiniTimeBot.lnk');$s.TargetPath='{app}\MiniTimeBot.exe';$s.WorkingDirectory='{app}';$s.Save(); (New-Object -COM Shell.Application).Namespace('{app}').ParseName('MiniTimeBot.lnk').InvokeVerb('taskbarpin')"""; \
+    Tasks: taskbar; Flags: runhidden nowait
+
+; 安装完成后选项
 Filename: "notepad.exe"; Parameters: "{app}\config\.env.example"; \
     Description: "打开 .env.example 查看配置说明"; Flags: nowait postinstall skipifsilent unchecked
 Filename: "{app}\MiniTimeBot.exe"; \
