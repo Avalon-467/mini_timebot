@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul 2>&1
-setlocal EnableDelayedExpansion
+setlocal
 
 :: Mini TimeBot 自动环境配置脚本 (Windows)
 
@@ -13,27 +13,29 @@ echo.
 
 :: --- 1. 检查并安装 uv ---
 where uv >nul 2>&1
-if %errorlevel% equ 0 (
+if not errorlevel 1 (
     echo [OK] uv 已安装
     uv --version
-) else (
-    echo [INSTALL] 未检测到 uv，正在安装...
-    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-    
-    :: 刷新 PATH
-    set "PATH=%USERPROFILE%\.local\bin;%PATH%"
-    set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
-    
-    where uv >nul 2>&1
-    if !errorlevel! equ 0 (
-        echo [OK] uv 安装成功
-    ) else (
-        echo [ERROR] uv 安装失败，请手动安装: https://docs.astral.sh/uv/
-        echo         安装后请重新打开终端再运行此脚本
-        pause
-        exit /b 1
-    )
+    goto :uv_ok
 )
+
+echo [INSTALL] 未检测到 uv，正在安装...
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+:: 刷新 PATH
+set "PATH=%USERPROFILE%\.local\bin;%PATH%"
+set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
+
+where uv >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] uv 安装失败，请手动安装: https://docs.astral.sh/uv/
+    echo         安装后请重新打开终端再运行此脚本
+    pause
+    exit /b 1
+)
+echo [OK] uv 安装成功
+
+:uv_ok
 
 :: --- 2. 检查并创建虚拟环境 ---
 if exist ".venv" (
