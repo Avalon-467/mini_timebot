@@ -1,13 +1,20 @@
 from flask import Flask, render_template_string, request, jsonify, session
 import requests
 import os
+from dotenv import load_dotenv
+
+# 加载 .env 配置
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(current_dir)
+load_dotenv(dotenv_path=os.path.join(root_dir, "config", ".env"))
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 
 # --- 配置区 ---
-LOCAL_AGENT_URL = "http://127.0.0.1:8000/ask"
-LOCAL_LOGIN_URL = "http://127.0.0.1:8000/login"
+PORT_AGENT = int(os.getenv("PORT_AGENT", "51200"))
+LOCAL_AGENT_URL = f"http://127.0.0.1:{PORT_AGENT}/ask"
+LOCAL_LOGIN_URL = f"http://127.0.0.1:{PORT_AGENT}/login"
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -340,5 +347,4 @@ def proxy_logout():
     return jsonify({"status": "success"})
 
 if __name__ == "__main__":
-    # 重要：运行在 9000 端口，对应你的隧道设置
-    app.run(host="127.0.0.1", port=9000, debug=False)
+    app.run(host="127.0.0.1", port=int(os.getenv("PORT_FRONTEND", "51209")), debug=False)

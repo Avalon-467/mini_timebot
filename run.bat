@@ -27,8 +27,8 @@ if /i "%answer%"=="y" (
 echo.
 echo ========== 4/4 启动服务 ==========
 
-:: 延迟 8 秒后自动打开浏览器（带提示）
-start "" cmd /c "echo 正在启动中，请稍等 8 秒... && timeout /t 8 /nobreak >nul && start http://127.0.0.1:9000"
+:: 延迟 8 秒后自动打开浏览器（端口从 .env 读取，默认 51209）
+start "" cmd /c "echo 正在启动中，请稍等 8 秒... && timeout /t 8 /nobreak >nul && start http://127.0.0.1:51209"
 
 :: 使用 Python 启动器，确保子进程能被正确管理和清理
 python scripts\launcher.py

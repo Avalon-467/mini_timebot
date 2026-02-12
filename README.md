@@ -8,15 +8,15 @@
 
 ```
 浏览器 (聊天 UI + 登录页)
-    │  HTTP :9000
+    │  HTTP :51209
     ▼
 front.py (Flask + Session)     ── 前端代理，渲染登录/聊天页面，管理会话凭证
-    │  HTTP :8000
+    │  HTTP :51200
     ▼
 mainagent.py (FastAPI + LangGraph)  ── 核心 AI Agent，集成 DeepSeek LLM + 对话记忆 + 密码认证
     │  stdio (MCP)
     ├── mcp_scheduler.py (FastMCP)  ── MCP 工具服务，暴露闹钟管理工具
-    │       │  HTTP :8001
+    │       │  HTTP :51201
     │       ▼
     ├── time.py (FastAPI + APScheduler)  ── 定时调度中心，管理 cron 任务
     ├── mcp_search.py (FastMCP)    ── MCP 搜索服务，提供联网搜索（DuckDuckGo）
@@ -27,13 +27,15 @@ mainagent.py (FastAPI + LangGraph)  ── 核心 AI Agent，集成 DeepSeek LLM
 
 | 服务 | 端口 | 说明 |
 |------|------|------|
-| `src/front.py` | 9000 | Flask Web UI，提供登录页 + 聊天界面，通过 Session 管理用户凭证 |
-| `src/mainagent.py` | 8000 | 核心 AI Agent（LangGraph + DeepSeek），管理对话、工具调用与密码认证 |
+| `src/front.py` | 51209 | Flask Web UI，提供登录页 + 聊天界面，通过 Session 管理用户凭证 |
+| `src/mainagent.py` | 51200 | 核心 AI Agent（LangGraph + DeepSeek），管理对话、工具调用与密码认证 |
 | `src/mcp_scheduler.py` | - | MCP 工具服务（Agent 子进程），提供 add_alarm / list_alarms / delete_alarm |
 | `src/mcp_search.py` | - | MCP 搜索服务（Agent 子进程），提供 web_search / web_news |
 | `src/mcp_filemanager.py` | - | MCP 文件服务（Agent 子进程），提供 list_files / read_file / write_file / append_file / delete_file |
-| `src/time.py` | 8001 | 定时任务调度中心（APScheduler），任务到期时回调 Agent |
+| `src/time.py` | 51201 | 定时任务调度中心（APScheduler），任务到期时回调 Agent |
 | `test/chat.py` | - | 命令行测试客户端 |
+
+> **端口可配置**：在 `config/.env` 中设置 `PORT_SCHEDULER`、`PORT_AGENT`、`PORT_FRONTEND` 即可自定义端口，参考 `config/.env.example`。
 
 ## 快速开始
 
@@ -161,7 +163,7 @@ python src/mainagent.py
 python src/front.py
 ```
 
-启动后访问 http://127.0.0.1:9000，输入用户名和密码登录后即可使用聊天界面。
+启动后访问 http://127.0.0.1:51209，输入用户名和密码登录后即可使用聊天界面。
 
 也可以使用命令行客户端进行测试：
 

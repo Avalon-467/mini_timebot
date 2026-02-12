@@ -9,6 +9,9 @@ __pycache__/
 # 环境变量配置（含密钥）
 config/.env
 
+# 但 .env.example 模板需要上传
+!config/.env.example
+
 # 用户密码配置（含哈希）
 config/users.json
 

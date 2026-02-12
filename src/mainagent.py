@@ -294,4 +294,4 @@ async def system_trigger(req: SystemTriggerRequest):
 
 if __name__ == "__main__":
     # 启动命令：python main.py
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=int(os.getenv("PORT_AGENT", "51200")))

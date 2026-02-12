@@ -1,11 +1,18 @@
 from mcp.server.fastmcp import FastMCP
 import httpx
+import os
+from dotenv import load_dotenv
 
 # 初始化 MCP 服务
 mcp = FastMCP("TimeMaster")
 
-# 指向你运行在 8001 端口的定时服务器
-SCHEDULER_URL = "http://127.0.0.1:8001/tasks"
+# 加载 .env 配置
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(current_dir)
+load_dotenv(dotenv_path=os.path.join(root_dir, "config", ".env"))
+
+PORT_SCHEDULER = int(os.getenv("PORT_SCHEDULER", "51201"))
+SCHEDULER_URL = f"http://127.0.0.1:{PORT_SCHEDULER}/tasks"
 
 @mcp.tool()
 async def add_alarm(user_id: str, cron: str, text: str) -> str:

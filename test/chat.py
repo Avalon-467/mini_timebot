@@ -2,7 +2,7 @@ import requests
 import json
 
 def send_message(user_id, text):
-    url = "http://127.0.0.1:8000/ask"
+    url = "http://127.0.0.1:51200/ask"
     payload = {
         "user_id": user_id,
         "text": text
@@ -40,7 +40,7 @@ if __name__ == "__main__":
 # import asyncio
 # import json
 
-# SCHEDULER_URL = "http://127.0.0.1:8001/tasks"
+# SCHEDULER_URL = "http://127.0.0.1:51201/tasks"
 
 # async def run_test():
 #     async with httpx.AsyncClient() as client:

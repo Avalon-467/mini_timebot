@@ -13,11 +13,15 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import uvicorn
+from dotenv import load_dotenv
 
 # --- 路径配置 ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(current_dir)
 TASKS_FILE = os.path.join(root_dir, "data", "timeset", "tasks.json")
+
+# 加载 .env 配置
+load_dotenv(dotenv_path=os.path.join(root_dir, "config", ".env"))
 
 # 确保目录存在
 os.makedirs(os.path.dirname(TASKS_FILE), exist_ok=True)
@@ -50,7 +54,8 @@ class TaskResponse(BaseModel):
 
 # --- 全局调度器 ---
 scheduler = AsyncIOScheduler()
-AGENT_URL = "http://127.0.0.1:8000/system_trigger"
+PORT_AGENT = int(os.getenv("PORT_AGENT", "51200"))
+AGENT_URL = f"http://127.0.0.1:{PORT_AGENT}/system_trigger"
 
 async def trigger_agent(user_id: str, text: str):
     """到达定时时间，向 Agent 发送 HTTP 请求"""
@@ -151,4 +156,4 @@ async def delete_task(task_id: str):
     raise HTTPException(status_code=404, detail="未找到任务")
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8001)
+    uvicorn.run(app, host="127.0.0.1", port=int(os.getenv("PORT_SCHEDULER", "51201")))

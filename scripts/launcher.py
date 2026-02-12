@@ -13,6 +13,7 @@ import os
 import signal
 import atexit
 import time
+from dotenv import load_dotenv
 
 # 切换到项目根目录
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -22,6 +23,14 @@ os.chdir(PROJECT_ROOT)
 if not os.path.exists("config/.env"):
     print("❌ 未找到 config/.env 文件，请先创建并填入 DEEPSEEK_API_KEY")
     sys.exit(1)
+
+# 加载 .env 配置
+load_dotenv(dotenv_path=os.path.join(PROJECT_ROOT, "config", ".env"))
+
+# 读取端口配置
+PORT_SCHEDULER = os.getenv("PORT_SCHEDULER", "51201")
+PORT_AGENT = os.getenv("PORT_AGENT", "51200")
+PORT_FRONTEND = os.getenv("PORT_FRONTEND", "51209")
 
 # 确定 Python 解释器路径（优先使用虚拟环境）
 if sys.platform == "win32":
@@ -121,9 +130,9 @@ print()
 
 # 服务配置：(提示信息, 脚本路径, 启动后等待秒数)
 services = [
-    ("⏰ [1/3] 启动定时调度中心 (port 8001)...", "src/time.py", 2),
-    ("🤖 [2/3] 启动 AI Agent (port 8000)...", "src/mainagent.py", 3),
-    ("🌐 [3/3] 启动前端 Web UI (port 9000)...", "src/front.py", 1),
+    (f"⏰ [1/3] 启动定时调度中心 (port {PORT_SCHEDULER})...", "src/time.py", 2),
+    (f"🤖 [2/3] 启动 AI Agent (port {PORT_AGENT})...", "src/mainagent.py", 3),
+    (f"🌐 [3/3] 启动前端 Web UI (port {PORT_FRONTEND})...", "src/front.py", 1),
 ]
 
 for msg, script, wait_time in services:
@@ -141,7 +150,7 @@ for msg, script, wait_time in services:
 print()
 print("============================================")
 print("  ✅ Mini TimeBot 已全部启动！")
-print("  🌐 访问: http://127.0.0.1:9000")
+print(f"  🌐 访问: http://127.0.0.1:{PORT_FRONTEND}")
 print("  按 Ctrl+C 停止所有服务")
 print("============================================")
 print()
