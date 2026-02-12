@@ -17,6 +17,7 @@ LOCAL_AGENT_URL = f"http://127.0.0.1:{PORT_AGENT}/ask"
 LOCAL_AGENT_STREAM_URL = f"http://127.0.0.1:{PORT_AGENT}/ask_stream"
 LOCAL_AGENT_CANCEL_URL = f"http://127.0.0.1:{PORT_AGENT}/cancel"
 LOCAL_LOGIN_URL = f"http://127.0.0.1:{PORT_AGENT}/login"
+LOCAL_TOOLS_URL = f"http://127.0.0.1:{PORT_AGENT}/tools"
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -39,6 +40,16 @@ HTML_TEMPLATE = """
         .message-agent { border-radius: 1.25rem 1.25rem 1.25rem 0.2rem; }
         .dot { width: 6px; height: 6px; background: #3b82f6; border-radius: 50%; animation: pulse 1.5s infinite; }
         @keyframes pulse { 0%, 100% { opacity: 0.3; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.2); } }
+        /* Tool panel styles */
+        .tool-panel { transition: max-height 0.3s ease, opacity 0.3s ease; overflow: hidden; }
+        .tool-panel.collapsed { max-height: 0; opacity: 0; }
+        .tool-panel.expanded { max-height: 300px; opacity: 1; overflow-y: auto; }
+        .tool-tag { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 9999px; font-size: 12px; background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; cursor: default; transition: background 0.2s; }
+        .tool-tag:hover { background: #dbeafe; }
+        .tool-toggle-btn { cursor: pointer; user-select: none; transition: color 0.2s; }
+        .tool-toggle-btn:hover { color: #2563eb; }
+        .tool-toggle-icon { display: inline-block; transition: transform 0.3s ease; }
+        .tool-toggle-icon.open { transform: rotate(180deg); }
     </style>
 </head>
 <body class="bg-gray-100 font-sans leading-normal tracking-normal">
@@ -93,6 +104,21 @@ HTML_TEMPLATE = """
         </div>
 
         <div class="p-4 border-t bg-white">
+            <!-- Tool List Panel -->
+            <div id="tool-panel-wrapper" class="mb-2" style="display:none;">
+                <div class="flex items-center justify-between mb-1">
+                    <div class="tool-toggle-btn flex items-center space-x-1 text-sm text-gray-500 font-medium" onclick="toggleToolPanel()">
+                        <span>🧰 可用工具</span>
+                        <span id="tool-count" class="text-xs text-gray-400"></span>
+                        <span id="tool-toggle-icon" class="tool-toggle-icon text-xs">▼</span>
+                    </div>
+                </div>
+                <div id="tool-panel" class="tool-panel collapsed">
+                    <div id="tool-list" class="flex flex-wrap gap-2 p-2 bg-gray-50 rounded-xl border border-gray-200">
+                        <!-- tools will be injected here -->
+                    </div>
+                </div>
+            </div>
             <div class="flex items-end space-x-3">
                 <div class="flex-grow">
                     <textarea id="user-input" rows="1" 
@@ -170,6 +196,7 @@ HTML_TEMPLATE = """
                 document.getElementById('login-screen').style.display = 'none';
                 document.getElementById('chat-screen').style.display = 'flex';
                 document.getElementById('user-input').focus();
+                loadTools(); // load tool list after login
             } catch (e) {
                 errorDiv.textContent = '网络错误: ' + e.message;
                 errorDiv.classList.remove('hidden');
@@ -199,6 +226,54 @@ HTML_TEMPLATE = """
                 </div>`;
         }
 
+        // ===== Tool Panel 逻辑 =====
+        let toolPanelOpen = false;
+
+        function toggleToolPanel() {
+            const panel = document.getElementById('tool-panel');
+            const icon = document.getElementById('tool-toggle-icon');
+            toolPanelOpen = !toolPanelOpen;
+            if (toolPanelOpen) {
+                panel.classList.remove('collapsed');
+                panel.classList.add('expanded');
+                icon.classList.add('open');
+            } else {
+                panel.classList.remove('expanded');
+                panel.classList.add('collapsed');
+                icon.classList.remove('open');
+            }
+        }
+
+        async function loadTools() {
+            try {
+                const resp = await fetch('/proxy_tools');
+                if (!resp.ok) return;
+                const data = await resp.json();
+                const tools = data.tools || [];
+                const toolList = document.getElementById('tool-list');
+                const toolCount = document.getElementById('tool-count');
+                const wrapper = document.getElementById('tool-panel-wrapper');
+
+                if (tools.length === 0) {
+                    wrapper.style.display = 'none';
+                    return;
+                }
+
+                toolCount.textContent = '(' + tools.length + ')';
+                toolList.innerHTML = '';
+                tools.forEach(t => {
+                    const tag = document.createElement('span');
+                    tag.className = 'tool-tag';
+                    tag.title = t.description || '';
+                    tag.textContent = t.name;
+                    toolList.appendChild(tag);
+                });
+                wrapper.style.display = 'block';
+            } catch (e) {
+                console.warn('Failed to load tools:', e);
+            }
+        }
+
         // 页面加载时检查 session（不自动登录，需要重新输入密码）
         (function checkSession() {
             const saved = sessionStorage.getItem('userId');
@@ -208,6 +283,7 @@ HTML_TEMPLATE = """
                 document.getElementById('uid-display').textContent = 'UID: ' + saved;
                 document.getElementById('login-screen').style.display = 'none';
                 document.getElementById('chat-screen').style.display = 'flex';
+                loadTools(); // restore tool list
             }
         })();
 
@@ -492,6 +568,15 @@ def proxy_cancel():
         return jsonify(r.json())
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route("/proxy_tools")
+def proxy_tools():
+    """代理获取工具列表请求到后端 Agent"""
+    try:
+        r = requests.get(LOCAL_TOOLS_URL, timeout=10)
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify({"error": str(e), "tools": []}), 500
 
 @app.route("/proxy_logout", methods=["POST"])
 def proxy_logout():

@@ -279,6 +279,19 @@ class SystemTriggerRequest(BaseModel):
     user_id: str
     text: str = "summary" # 默认为总结指令
 
+# 获取工具列表接口
+@app.get("/tools")
+async def get_tools_list():
+    """返回当前 Agent 加载的所有 MCP 工具信息"""
+    tools = getattr(app.state, "mcp_tools", [])
+    tools_info = []
+    for t in tools:
+        tools_info.append({
+            "name": t.name,
+            "description": t.description or "",
+        })
+    return {"status": "success", "tools": tools_info}
+
 # 登录验证接口
 @app.post("/login")
 async def login(req: LoginRequest):
