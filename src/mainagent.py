@@ -19,7 +19,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 # 模型相关
 from langchain_deepseek import ChatDeepSeek
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -248,6 +248,22 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# --- 用户级任务管理 ---
+# key: user_id, value: 当前活跃的 asyncio.Task
+_active_tasks: dict[str, asyncio.Task] = {}
+_task_lock = asyncio.Lock()
+
+async def _cancel_and_wait(user_id: str):
+    """取消指定用户的活跃任务并等待其结束"""
+    task = _active_tasks.get(user_id)
+    if task and not task.done():
+        task.cancel()
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
+        except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+            pass
+    _active_tasks.pop(user_id, None)
+
 # --- 5. API 定义 ---
 
 class LoginRequest(BaseModel):
@@ -296,6 +312,10 @@ async def ask_agent_stream(req: UserRequest):
     if not verify_password(req.user_id, req.password):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
+    # 先取消该用户上一轮未完成的任务
+    async with _task_lock:
+        await _cancel_and_wait(req.user_id)
+
     agent_app = app.state.agent_app
     config = {"configurable": {"thread_id": req.user_id}}
 
@@ -304,30 +324,53 @@ async def ask_agent_stream(req: UserRequest):
         "trigger_source": "user"
     }
 
-    async def event_generator():
+    # 用 asyncio.Queue 在 Task 和生成器之间传递 SSE 数据
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def _stream_worker():
+        """在独立 Task 中运行 astream_events，产出数据写入 queue"""
+        collected_tokens = []  # 收集 LLM 输出的原始 token
         try:
             async for event in agent_app.astream_events(user_input, config, version="v2"):
                 kind = event.get("event", "")
-                # 只关注 LLM 逐 token 输出的事件
                 if kind == "on_chat_model_stream":
                     chunk = event.get("data", {}).get("chunk")
                     if chunk and hasattr(chunk, "content") and chunk.content:
-                        # SSE 格式：data: ...\n\n
-                        # 对内容进行转义，确保换行符不会破坏 SSE 格式
+                        collected_tokens.append(chunk.content)
                         text = chunk.content.replace("\\", "\\\\").replace("\n", "\\n")
-                        yield f"data: {text}\n\n"
-                # 工具调用开始时发送提示
+                        await queue.put(f"data: {text}\n\n")
                 elif kind == "on_tool_start":
                     tool_name = event.get("name", "")
-                    yield f"data: \\n🔧 调用工具: {tool_name}...\\n\n\n"
-                # 工具调用结束
+                    await queue.put(f"data: \\n🔧 调用工具: {tool_name}...\\n\n\n")
                 elif kind == "on_tool_end":
-                    yield f"data: \\n✅ 工具执行完成\\n\n\n"
-            # 流结束标记
-            yield "data: [DONE]\n\n"
+                    await queue.put(f"data: \\n✅ 工具执行完成\\n\n\n")
+            await queue.put("data: [DONE]\n\n")
+        except asyncio.CancelledError:
+            # 终止时，将已收集的 token 作为 AIMessage 写入 checkpoint
+            partial_text = "".join(collected_tokens)
+            if partial_text:
+                partial_text += "\n\n⚠️ （回复被用户终止）"
+                partial_msg = AIMessage(content=partial_text)
+                await agent_app.aupdate_state(config, {"messages": [partial_msg]})
+            await queue.put(f"data: \\n\\n⚠️ 已终止思考\n\n")
+            await queue.put("data: [DONE]\n\n")
         except Exception as e:
-            yield f"data: \\n❌ 流式响应异常: {str(e)}\n\n"
-            yield "data: [DONE]\n\n"
+            await queue.put(f"data: \\n❌ 流式响应异常: {str(e)}\n\n")
+            await queue.put("data: [DONE]\n\n")
+        finally:
+            await queue.put(None)  # 哨兵值，通知生成器结束
+            _active_tasks.pop(req.user_id, None)
+
+    # 启动 worker Task 并注册
+    task = asyncio.create_task(_stream_worker())
+    _active_tasks[req.user_id] = task
+
+    async def event_generator():
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            yield item
 
     return StreamingResponse(
         event_generator(),
@@ -335,11 +378,25 @@ async def ask_agent_stream(req: UserRequest):
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # 禁用 Nginx 缓冲
+            "X-Accel-Buffering": "no",
         },
     )
 
 # B. 外部定时器触发接口 (兼容独立进程/Cron任务)
+
+class CancelRequest(BaseModel):
+    user_id: str
+    password: str
+
+@app.post("/cancel")
+async def cancel_agent(req: CancelRequest):
+    """终止指定用户的智能体思考：取消底层 Task"""
+    if not verify_password(req.user_id, req.password):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    await _cancel_and_wait(req.user_id)
+    return {"status": "success", "message": "已终止"}
+
+# C. 外部定时器触发接口 (兼容独立进程/Cron任务)
 @app.post("/system_trigger")
 async def system_trigger(req: SystemTriggerRequest):
     agent_app = app.state.agent_app

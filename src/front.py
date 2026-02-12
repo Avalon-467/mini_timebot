@@ -15,6 +15,7 @@ app.secret_key = os.urandom(24)
 PORT_AGENT = int(os.getenv("PORT_AGENT", "51200"))
 LOCAL_AGENT_URL = f"http://127.0.0.1:{PORT_AGENT}/ask"
 LOCAL_AGENT_STREAM_URL = f"http://127.0.0.1:{PORT_AGENT}/ask_stream"
+LOCAL_AGENT_CANCEL_URL = f"http://127.0.0.1:{PORT_AGENT}/cancel"
 LOCAL_LOGIN_URL = f"http://127.0.0.1:{PORT_AGENT}/login"
 
 HTML_TEMPLATE = """
@@ -102,6 +103,11 @@ HTML_TEMPLATE = """
                     class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl transition-all font-bold shadow-lg h-[50px]">
                     发送
                 </button>
+                <button onclick="handleCancel()" id="cancel-btn"
+                    class="bg-red-500 hover:bg-red-600 text-white px-6 py-3 rounded-xl transition-all font-bold shadow-lg h-[50px]"
+                    style="display:none;">
+                    终止
+                </button>
             </div>
             <p class="text-[10px] text-center text-gray-400 mt-3 font-mono">Secured by Nginx Reverse Proxy & SSH Tunnel</p>
         </div>
@@ -117,6 +123,7 @@ HTML_TEMPLATE = """
         });
 
         let currentUserId = null;
+        let currentAbortController = null; // 用于终止流式请求
 
         // ===== 登录逻辑 =====
         async function handleLogin() {
@@ -216,6 +223,32 @@ HTML_TEMPLATE = """
         const chatBox = document.getElementById('chat-box');
         const inputField = document.getElementById('user-input');
         const sendBtn = document.getElementById('send-btn');
+        const cancelBtn = document.getElementById('cancel-btn');
+
+        function setStreamingUI(streaming) {
+            if (streaming) {
+                sendBtn.style.display = 'none';
+                cancelBtn.style.display = 'inline-block';
+                inputField.disabled = true;
+            } else {
+                sendBtn.style.display = 'inline-block';
+                cancelBtn.style.display = 'none';
+                sendBtn.disabled = false;
+                inputField.disabled = false;
+            }
+        }
+
+        async function handleCancel() {
+            // 1. 中断前端的 fetch 流读取
+            if (currentAbortController) {
+                currentAbortController.abort();
+                currentAbortController = null;
+            }
+            // 2. 通知后端终止智能体
+            try {
+                await fetch("/proxy_cancel", { method: 'POST' });
+            } catch(e) { /* 忽略 */ }
+        }
 
         function appendMessage(content, isUser = false) {
             const wrapper = document.createElement('div');
@@ -257,11 +290,19 @@ HTML_TEMPLATE = """
             sendBtn.disabled = true;
             showTyping();
 
+            // 创建 AbortController 用于终止请求
+            currentAbortController = new AbortController();
+            setStreamingUI(true);
+
+            let agentDiv = null;
+            let fullText = '';
+
             try {
                 const response = await fetch("/proxy_ask_stream", {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ content: text })
+                    body: JSON.stringify({ content: text }),
+                    signal: currentAbortController.signal
                 });
 
                 const typingIndicator = document.getElementById('typing-indicator');
@@ -275,8 +316,7 @@ HTML_TEMPLATE = """
                 if (!response.ok) throw new Error("Agent 响应异常");
 
                 // 创建空的 agent 消息气泡，后续逐步填充
-                const agentDiv = appendMessage('', false);
-                let fullText = '';
+                agentDiv = appendMessage('', false);
 
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
@@ -324,9 +364,20 @@ HTML_TEMPLATE = """
             } catch (error) {
                 const typingIndicator = document.getElementById('typing-indicator');
                 if (typingIndicator) typingIndicator.remove();
-                appendMessage("❌ 错误: " + error.message, false);
+                if (error.name === 'AbortError') {
+                    // 用户主动终止：保留已有内容，追加终止标记
+                    if (agentDiv) {
+                        fullText += '\\n\\n⚠️ 已终止思考';
+                        agentDiv.innerHTML = marked.parse(fullText);
+                    } else {
+                        appendMessage("⚠️ 已终止思考", false);
+                    }
+                } else {
+                    appendMessage("❌ 错误: " + error.message, false);
+                }
             } finally {
-                sendBtn.disabled = false;
+                currentAbortController = null;
+                setStreamingUI(false);
             }
         }
 
@@ -426,6 +477,19 @@ def proxy_ask_stream():
                 "X-Accel-Buffering": "no",
             },
         )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/proxy_cancel", methods=["POST"])
+def proxy_cancel():
+    """代理取消请求到后端 Agent"""
+    user_id = session.get("user_id")
+    password = session.get("password")
+    if not user_id or not password:
+        return jsonify({"error": "未登录"}), 401
+    try:
+        r = requests.post(LOCAL_AGENT_CANCEL_URL, json={"user_id": user_id, "password": password}, timeout=5)
+        return jsonify(r.json())
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
