@@ -8,6 +8,7 @@ from typing import Annotated, TypedDict, Optional
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import uvicorn
 
@@ -288,6 +289,55 @@ async def ask_agent(req: UserRequest):
         "status": "success",
         "response": result["messages"][-1].content
     }
+
+# A2. 用户输入接口 — 流式响应（SSE）
+@app.post("/ask_stream")
+async def ask_agent_stream(req: UserRequest):
+    if not verify_password(req.user_id, req.password):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    agent_app = app.state.agent_app
+    config = {"configurable": {"thread_id": req.user_id}}
+
+    user_input = {
+        "messages": [HumanMessage(content=req.text)],
+        "trigger_source": "user"
+    }
+
+    async def event_generator():
+        try:
+            async for event in agent_app.astream_events(user_input, config, version="v2"):
+                kind = event.get("event", "")
+                # 只关注 LLM 逐 token 输出的事件
+                if kind == "on_chat_model_stream":
+                    chunk = event.get("data", {}).get("chunk")
+                    if chunk and hasattr(chunk, "content") and chunk.content:
+                        # SSE 格式：data: ...\n\n
+                        # 对内容进行转义，确保换行符不会破坏 SSE 格式
+                        text = chunk.content.replace("\\", "\\\\").replace("\n", "\\n")
+                        yield f"data: {text}\n\n"
+                # 工具调用开始时发送提示
+                elif kind == "on_tool_start":
+                    tool_name = event.get("name", "")
+                    yield f"data: \\n🔧 调用工具: {tool_name}...\\n\n\n"
+                # 工具调用结束
+                elif kind == "on_tool_end":
+                    yield f"data: \\n✅ 工具执行完成\\n\n\n"
+            # 流结束标记
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            yield f"data: \\n❌ 流式响应异常: {str(e)}\n\n"
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # 禁用 Nginx 缓冲
+        },
+    )
 
 # B. 外部定时器触发接口 (兼容独立进程/Cron任务)
 @app.post("/system_trigger")

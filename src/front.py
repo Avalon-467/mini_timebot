@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, request, jsonify, session
+from flask import Flask, render_template_string, request, jsonify, session, Response
 import requests
 import os
 from dotenv import load_dotenv
@@ -14,6 +14,7 @@ app.secret_key = os.urandom(24)
 # --- 配置区 ---
 PORT_AGENT = int(os.getenv("PORT_AGENT", "51200"))
 LOCAL_AGENT_URL = f"http://127.0.0.1:{PORT_AGENT}/ask"
+LOCAL_AGENT_STREAM_URL = f"http://127.0.0.1:{PORT_AGENT}/ask_stream"
 LOCAL_LOGIN_URL = f"http://127.0.0.1:{PORT_AGENT}/login"
 
 HTML_TEMPLATE = """
@@ -257,22 +258,69 @@ HTML_TEMPLATE = """
             showTyping();
 
             try {
-                const response = await fetch("/proxy_ask", {
+                const response = await fetch("/proxy_ask_stream", {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ content: text })
                 });
+
                 const typingIndicator = document.getElementById('typing-indicator');
                 if (typingIndicator) typingIndicator.remove();
+
                 if (response.status === 401) {
                     appendMessage("⚠️ 登录已过期，请重新登录", false);
                     handleLogout();
                     return;
                 }
                 if (!response.ok) throw new Error("Agent 响应异常");
-                const data = await response.json();
-                const agentReply = data.response || data.output || JSON.stringify(data);
-                appendMessage(agentReply, false);
+
+                // 创建空的 agent 消息气泡，后续逐步填充
+                const agentDiv = appendMessage('', false);
+                let fullText = '';
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\\n');
+                    buffer = lines.pop(); // 保留不完整的行
+
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        const payload = line.slice(6);
+                        if (payload === '[DONE]') continue;
+
+                        // 反转义：还原换行符
+                        const text = payload.replace(/\\\\n/g, '\\n').replace(/\\\\\\\\/g, '\\\\');
+                        fullText += text;
+
+                        // 实时渲染 Markdown
+                        agentDiv.innerHTML = marked.parse(fullText);
+                        agentDiv.querySelectorAll('pre code').forEach((block) => {
+                            if (!block.dataset.highlighted) {
+                                hljs.highlightElement(block);
+                                block.dataset.highlighted = 'true';
+                            }
+                        });
+                        chatBox.scrollTop = chatBox.scrollHeight;
+                    }
+                }
+
+                // 最终完整渲染一次（确保 Markdown 完整解析）
+                if (fullText) {
+                    agentDiv.innerHTML = marked.parse(fullText);
+                    agentDiv.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
+                    chatBox.scrollTop = chatBox.scrollHeight;
+                }
+
+                if (!fullText) {
+                    agentDiv.innerHTML = '<span class="text-gray-400">（无响应）</span>';
+                }
             } catch (error) {
                 const typingIndicator = document.getElementById('typing-indicator');
                 if (typingIndicator) typingIndicator.remove();
@@ -338,6 +386,46 @@ def proxy_ask():
             session.clear()
             return jsonify(r.json()), 401
         return jsonify(r.json())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/proxy_ask_stream", methods=["POST"])
+def proxy_ask_stream():
+    """流式代理：将 Agent 的 SSE 响应透传给前端"""
+    user_id = session.get("user_id")
+    password = session.get("password")
+    if not user_id or not password:
+        return jsonify({"error": "未登录"}), 401
+
+    user_content = request.json.get("content")
+    payload = {
+        "user_id": user_id,
+        "password": password,
+        "text": user_content
+    }
+
+    try:
+        r = requests.post(LOCAL_AGENT_STREAM_URL, json=payload, stream=True, timeout=120)
+        if r.status_code == 401:
+            session.clear()
+            return jsonify({"error": "认证失败"}), 401
+        if r.status_code != 200:
+            return jsonify({"error": f"Agent 返回 {r.status_code}"}), r.status_code
+
+        def generate():
+            for line in r.iter_lines(decode_unicode=True):
+                if line:
+                    yield line + "\n\n"
+
+        return Response(
+            generate(),
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
