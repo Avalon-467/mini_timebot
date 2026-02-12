@@ -30,6 +30,11 @@ fi
 echo ""
 echo "========== 4/4 启动服务 =========="
 
+# 激活虚拟环境（如果存在）
+if [ -f .venv/bin/activate ]; then
+    source .venv/bin/activate
+fi
+
 # 询问是否部署公网
 read -p "是否部署到公网？(y/N): " tunnel_answer
 if [[ "$tunnel_answer" =~ ^[Yy]$ ]]; then
