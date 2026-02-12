@@ -13,6 +13,7 @@ import os
 import signal
 import atexit
 import time
+import webbrowser
 from dotenv import load_dotenv
 
 # 切换到项目根目录
@@ -154,6 +155,14 @@ print(f"  🌐 访问: http://127.0.0.1:{PORT_FRONTEND}")
 print("  按 Ctrl+C 停止所有服务")
 print("============================================")
 print()
+
+# 自动打开浏览器
+url = f"http://127.0.0.1:{PORT_FRONTEND}"
+try:
+    webbrowser.open(url)
+    print(f"🌐 已自动打开浏览器: {url}")
+except Exception:
+    print(f"⚠️  无法自动打开浏览器，请手动访问: {url}")
 
 # 等待任意子进程退出
 try:

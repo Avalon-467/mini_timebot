@@ -8,16 +8,22 @@ cd /d "%~dp0\.."
 set "ENV_FILE=config\.env"
 set "EXAMPLE_FILE=config\.env.example"
 
-:: 已有 .env 且 Key 已配置，跳过
+:: 已有 .env 且 Key 已配置，询问是否重置
 if not exist "%ENV_FILE%" goto ask_key
 
 :: 读取当前 Key
 for /f "tokens=1,* delims==" %%a in ('findstr /i "DEEPSEEK_API_KEY" "%ENV_FILE%"') do set "CURRENT_KEY=%%b"
 if "%CURRENT_KEY%"=="" goto ask_key
-if "%CURRENT_KEY%"=="your_deepseek_api_key_here" goto ask_key
+if "%CURRENT_KEY%"=="your_api_key_here" goto ask_key
 
-echo [OK] API Key 已配置
-exit /b 0
+:: Key 已存在，显示部分内容并询问
+set "KEY_PREFIX=%CURRENT_KEY:~0,8%"
+echo [OK] API Key 已配置（%KEY_PREFIX%...）
+set /p RESET=是否重新配置？(y/N): 
+if /i not "%RESET%"=="y" (
+    echo    保持现有配置
+    exit /b 0
+)
 
 :ask_key
 echo ================================================
@@ -34,17 +40,32 @@ if "%API_KEY%"=="" (
     exit /b 1
 )
 
-:: 读取已有 API_BASE 或使用默认值
-set "API_BASE=https://api.deepseek.com"
+:: 如果已有 .env，用 PowerShell 原地替换 Key，保留其余配置
 if exist "%ENV_FILE%" (
-    for /f "tokens=1,* delims==" %%a in ('findstr /i "DEEPSEEK_API_BASE" "%ENV_FILE%"') do set "API_BASE=%%b"
+    :: 检查是否已有 DEEPSEEK_API_KEY 行
+    findstr /i "^DEEPSEEK_API_KEY=" "%ENV_FILE%" >nul 2>&1
+    if %errorlevel%==0 (
+        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^DEEPSEEK_API_KEY=.*', 'DEEPSEEK_API_KEY=%API_KEY%' | Set-Content '%ENV_FILE%'"
+    ) else (
+        echo DEEPSEEK_API_KEY=%API_KEY%>> "%ENV_FILE%"
+    )
+    :: 确保 API_BASE 存在
+    findstr /i "^DEEPSEEK_API_BASE=" "%ENV_FILE%" >nul 2>&1
+    if %errorlevel% neq 0 (
+        echo DEEPSEEK_API_BASE=https://api.deepseek.com>> "%ENV_FILE%"
+    )
+) else (
+    :: 首次创建：从模板复制再写入
+    if exist "%EXAMPLE_FILE%" (
+        copy /y "%EXAMPLE_FILE%" "%ENV_FILE%" >nul
+        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^DEEPSEEK_API_KEY=.*', 'DEEPSEEK_API_KEY=%API_KEY%' | Set-Content '%ENV_FILE%'"
+    ) else (
+        (
+            echo DEEPSEEK_API_KEY=%API_KEY%
+            echo DEEPSEEK_API_BASE=https://api.deepseek.com
+        ) > "%ENV_FILE%"
+    )
 )
-
-:: 写入 .env
-(
-    echo DEEPSEEK_API_KEY=%API_KEY%
-    echo DEEPSEEK_API_BASE=%API_BASE%
-) > "%ENV_FILE%"
 
 echo [OK] API Key 已保存到 config\.env
 exit /b 0

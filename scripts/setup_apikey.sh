@@ -6,12 +6,16 @@ cd "$(dirname "$0")/.."
 ENV_FILE="config/.env"
 EXAMPLE_FILE="config/.env.example"
 
-# 已有 .env 且 Key 已配置，跳过
+# 已有 .env 且 Key 已配置，询问是否重置
 if [ -f "$ENV_FILE" ]; then
     KEY=$(grep -oP '(?<=DEEPSEEK_API_KEY=).+' "$ENV_FILE")
-    if [ -n "$KEY" ] && [ "$KEY" != "your_deepseek_api_key_here" ]; then
-        echo "[OK] API Key 已配置"
-        return 0 2>/dev/null || exit 0
+    if [ -n "$KEY" ] && [ "$KEY" != "your_api_key_here" ]; then
+        echo "✅ API Key 已配置（${KEY:0:8}...${KEY: -4}）"
+        read -p "是否重新配置？(y/N): " reset
+        if [[ ! "$reset" =~ ^[Yy]$ ]]; then
+            echo "   保持现有配置"
+            return 0 2>/dev/null || exit 0
+        fi
     fi
 fi
 
@@ -29,16 +33,29 @@ if [ -z "$api_key" ]; then
     return 1 2>/dev/null || exit 1
 fi
 
-# 读取 API_BASE（如果已有 .env 就保留，否则用默认值）
+# 如果已有 .env，只替换/追加 Key 相关行，保留其余配置（端口等）
 if [ -f "$ENV_FILE" ]; then
-    API_BASE=$(grep -oP '(?<=DEEPSEEK_API_BASE=).+' "$ENV_FILE")
-fi
-API_BASE="${API_BASE:-https://api.deepseek.com}"
-
-# 写入 .env
-cat > "$ENV_FILE" << EOF
+    # 更新 DEEPSEEK_API_KEY
+    if grep -q '^DEEPSEEK_API_KEY=' "$ENV_FILE"; then
+        sed -i "s|^DEEPSEEK_API_KEY=.*|DEEPSEEK_API_KEY=$api_key|" "$ENV_FILE"
+    else
+        echo "DEEPSEEK_API_KEY=$api_key" >> "$ENV_FILE"
+    fi
+    # 确保 API_BASE 存在
+    if ! grep -q '^DEEPSEEK_API_BASE=' "$ENV_FILE"; then
+        echo "DEEPSEEK_API_BASE=https://api.deepseek.com" >> "$ENV_FILE"
+    fi
+else
+    # 首次创建：从模板复制再写入
+    if [ -f "$EXAMPLE_FILE" ]; then
+        cp "$EXAMPLE_FILE" "$ENV_FILE"
+        sed -i "s|^DEEPSEEK_API_KEY=.*|DEEPSEEK_API_KEY=$api_key|" "$ENV_FILE"
+    else
+        cat > "$ENV_FILE" << EOF
 DEEPSEEK_API_KEY=$api_key
-DEEPSEEK_API_BASE=$API_BASE
+DEEPSEEK_API_BASE=https://api.deepseek.com
 EOF
+    fi
+fi
 
 echo "✅ API Key 已保存到 config/.env"
