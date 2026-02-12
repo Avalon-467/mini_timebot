@@ -3,9 +3,11 @@ MCP 指令执行工具服务 — 安全沙箱化的系统命令执行
 - 每个用户有独立的工作目录 (data/user_files/<username>/)
 - 严格白名单机制，只允许安全命令
 - 超时保护、输出截断、路径穿越防护
+- 跨平台支持（Linux/macOS/Windows）
 """
 
 import os
+import sys
 import asyncio
 import shlex
 from dotenv import load_dotenv
@@ -22,25 +24,49 @@ load_dotenv(dotenv_path=os.path.join(PROJECT_ROOT, "config", ".env"))
 # 用户文件根目录（与 mcp_filemanager.py 共享）
 USER_FILES_BASE = os.path.join(PROJECT_ROOT, "data", "user_files")
 
+# 平台检测
+IS_WINDOWS = sys.platform == "win32"
+
 # ======== 安全配置（支持 .env 自定义）========
 
-# 内置默认白名单
-_DEFAULT_COMMANDS = {
-    # 文件与目录
-    "ls", "cat", "head", "tail", "wc", "du", "find", "file", "stat",
-    # 文本处理
-    "grep", "awk", "sed", "sort", "uniq", "cut", "tr", "diff", "comm",
-    # 系统信息（只读）
-    "echo", "date", "cal", "whoami", "uname", "hostname",
-    "uptime", "free", "df", "env", "printenv",
-    # 实用工具
-    "pwd", "which", "expr", "seq", "yes", "true", "false",
-    "base64", "md5sum", "sha256sum", "xxd",
-    # Python
-    "python", "python3",
-    # 网络（只读）
-    "ping", "curl", "wget",
-}
+# 内置默认白名单（按平台区分）
+if IS_WINDOWS:
+    _DEFAULT_COMMANDS = {
+        # 文件与目录
+        "dir", "type", "more", "find", "findstr", "where", "tree",
+        "copy", "move", "ren",
+        # 文本处理
+        "sort", "fc",
+        # 系统信息（只读）
+        "echo", "date", "time", "whoami", "hostname",
+        "systeminfo", "set", "ver", "vol",
+        "tasklist", "wmic",
+        # 实用工具
+        "cd", "chdir", "certutil",
+        # Python
+        "python", "python3",
+        # 网络（只读）
+        "ping", "curl", "ipconfig", "nslookup", "tracert", "netstat",
+        # PowerShell 常用（安全子集）
+        "powershell",
+    }
+else:
+    _DEFAULT_COMMANDS = {
+        # 文件与目录
+        "ls", "cat", "head", "tail", "wc", "du", "find", "file", "stat",
+        # 文本处理
+        "grep", "awk", "sed", "sort", "uniq", "cut", "tr", "diff", "comm",
+        # 系统信息（只读）
+        "echo", "date", "cal", "whoami", "uname", "hostname",
+        "uptime", "free", "df", "env", "printenv",
+        # 实用工具
+        "pwd", "which", "expr", "seq", "yes", "true", "false",
+        "base64", "md5sum", "sha256sum", "xxd",
+        # Python
+        "python", "python3",
+        # 网络（只读）
+        "ping", "curl", "wget",
+    }
 
 # 从 .env 读取用户自定义白名单，留空或不设置则使用默认
 _env_commands = os.getenv("ALLOWED_COMMANDS", "").strip()
@@ -50,18 +76,58 @@ else:
     ALLOWED_COMMANDS = _DEFAULT_COMMANDS
 
 # 严格禁止的命令（即使在白名单中也拒绝这些子命令/参数模式）
-BLOCKED_PATTERNS = [
-    "rm -rf /", "rm -rf /*", "mkfs", "dd if=", ":(){ :", "fork bomb",
-    "> /dev/sd", "chmod 777 /", "chown root", "/etc/passwd", "/etc/shadow",
-    "sudo", "su ", "shutdown", "reboot", "halt", "poweroff",
-    "systemctl", "service ", "init ",
-]
+if IS_WINDOWS:
+    BLOCKED_PATTERNS = [
+        "del /s /q c:\\", "format ", "diskpart", "bcdedit",
+        "reg delete", "reg add",
+        "shutdown", "restart", "logoff",
+        "net user", "net localgroup", "runas",
+        "taskkill /f /im", "schtasks /delete",
+        "powershell -enc", "powershell -e ",  # 编码执行，可绕过审查
+        "invoke-expression", "iex ", "iex(",
+        "remove-item -recurse -force c:\\",
+    ]
+else:
+    BLOCKED_PATTERNS = [
+        "rm -rf /", "rm -rf /*", "mkfs", "dd if=", ":(){ :", "fork bomb",
+        "> /dev/sd", "chmod 777 /", "chown root", "/etc/passwd", "/etc/shadow",
+        "sudo", "su ", "shutdown", "reboot", "halt", "poweroff",
+        "systemctl", "service ", "init ",
+    ]
 
 # 执行超时（秒）— 支持 .env 自定义
 EXEC_TIMEOUT = int(os.getenv("EXEC_TIMEOUT", "30"))
 
 # 输出最大长度（字符数）— 支持 .env 自定义
 MAX_OUTPUT_LENGTH = int(os.getenv("MAX_OUTPUT_LENGTH", "8000"))
+
+
+def _sandbox_env(workspace: str, username: str) -> dict:
+    """构造沙箱环境变量（跨平台）"""
+    if IS_WINDOWS:
+        return {
+            "PATH": os.environ.get("PATH", ""),
+            "SYSTEMROOT": os.environ.get("SYSTEMROOT", r"C:\Windows"),
+            "COMSPEC": os.environ.get("COMSPEC", r"C:\Windows\system32\cmd.exe"),
+            "USERPROFILE": workspace,
+            "USERNAME": username,
+            "TEMP": os.environ.get("TEMP", workspace),
+            "TMP": os.environ.get("TMP", workspace),
+        }
+    else:
+        return {
+            "PATH": "/usr/local/bin:/usr/bin:/bin",
+            "HOME": workspace,
+            "USER": username,
+            "LANG": "en_US.UTF-8",
+            "LC_ALL": "en_US.UTF-8",
+            "TERM": "xterm",
+        }
+
+
+def _python_cmd() -> str:
+    """返回当前平台的 Python 命令名"""
+    return sys.executable
 
 
 def _user_workspace(username: str) -> str:
@@ -148,14 +214,7 @@ async def run_command(username: str, command: str) -> str:
             stderr=asyncio.subprocess.PIPE,
             cwd=workspace,
             # 限制环境变量，移除敏感信息
-            env={
-                "PATH": "/usr/local/bin:/usr/bin:/bin",
-                "HOME": workspace,
-                "USER": username,
-                "LANG": "en_US.UTF-8",
-                "LC_ALL": "en_US.UTF-8",
-                "TERM": "xterm",
-            },
+            env=_sandbox_env(workspace, username),
         )
 
         # 4. 带超时等待
@@ -212,18 +271,11 @@ async def run_python_code(username: str, code: str) -> str:
             f.write(code)
 
         proc = await asyncio.create_subprocess_exec(
-            "python3", tmp_script,
+            _python_cmd(), tmp_script,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=workspace,
-            env={
-                "PATH": "/usr/local/bin:/usr/bin:/bin",
-                "HOME": workspace,
-                "USER": username,
-                "LANG": "en_US.UTF-8",
-                "PYTHONPATH": "",
-                "PYTHONDONTWRITEBYTECODE": "1",
-            },
+            env=_sandbox_env(workspace, username),
         )
 
         try:
@@ -271,16 +323,29 @@ async def list_allowed_commands() -> str:
     列出所有允许执行的系统命令白名单。
     用户想了解能执行哪些命令时调用此工具。
     """
-    # 按类别分组（动态匹配当前生效的白名单）
-    categories = [
-        ("📁 文件与目录", ["ls", "cat", "head", "tail", "wc", "du", "find", "file", "stat"]),
-        ("📝 文本处理", ["grep", "awk", "sed", "sort", "uniq", "cut", "tr", "diff", "comm"]),
-        ("🖥️ 系统信息", ["echo", "date", "cal", "whoami", "uname", "hostname",
-                       "uptime", "free", "df", "env", "printenv"]),
-        ("🔧 实用工具", ["pwd", "which", "expr", "seq", "base64", "md5sum", "sha256sum", "xxd"]),
-        ("🐍 Python", ["python", "python3"]),
-        ("🌐 网络", ["ping", "curl", "wget"]),
-    ]
+    # 按类别分组（动态匹配当前生效的白名单，按平台区分）
+    if IS_WINDOWS:
+        categories = [
+            ("📁 文件与目录", ["dir", "type", "more", "find", "findstr", "where", "tree",
+                             "copy", "move", "ren"]),
+            ("📝 文本处理", ["sort", "fc"]),
+            ("🖥️ 系统信息", ["echo", "date", "time", "whoami", "hostname",
+                           "systeminfo", "set", "ver", "vol", "tasklist", "wmic"]),
+            ("🔧 实用工具", ["cd", "chdir", "certutil"]),
+            ("🐍 Python", ["python", "python3"]),
+            ("🌐 网络", ["ping", "curl", "ipconfig", "nslookup", "tracert", "netstat"]),
+            ("💠 PowerShell", ["powershell"]),
+        ]
+    else:
+        categories = [
+            ("📁 文件与目录", ["ls", "cat", "head", "tail", "wc", "du", "find", "file", "stat"]),
+            ("📝 文本处理", ["grep", "awk", "sed", "sort", "uniq", "cut", "tr", "diff", "comm"]),
+            ("🖥️ 系统信息", ["echo", "date", "cal", "whoami", "uname", "hostname",
+                           "uptime", "free", "df", "env", "printenv"]),
+            ("🔧 实用工具", ["pwd", "which", "expr", "seq", "base64", "md5sum", "sha256sum", "xxd"]),
+            ("🐍 Python", ["python", "python3"]),
+            ("🌐 网络", ["ping", "curl", "wget"]),
+        ]
 
     is_custom = bool(_env_commands)
     result = "📋 **允许执行的命令白名单**"
