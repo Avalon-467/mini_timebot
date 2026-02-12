@@ -13,6 +13,11 @@ if errorlevel 1 (
     exit /b 1
 )
 
+:: 激活虚拟环境（如果存在），后续所有 python 调用均使用虚拟环境
+if exist .venv\Scripts\activate.bat (
+    call .venv\Scripts\activate.bat
+)
+
 echo.
 echo ========== 2/4 API Key 配置 ==========
 call scripts\setup_apikey.bat
@@ -26,5 +31,14 @@ if /i "%answer%"=="y" (
 
 echo.
 echo ========== 4/4 启动服务 ==========
+
+:: 询问是否部署公网
+set /p tunnel_answer=是否部署到公网？(y/N): 
+if /i "%tunnel_answer%"=="y" (
+    echo 正在后台启动 Cloudflare Tunnel...
+    start /b python scripts\tunnel.py
+    timeout /t 2 /nobreak >nul
+)
+
 :: 使用 Python 启动器（启动完成后自动打开浏览器）
 python scripts\launcher.py

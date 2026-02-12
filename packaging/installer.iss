@@ -33,7 +33,7 @@ Source: "..\MiniTimeBot.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\run.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\run.sh"; DestDir: "{app}"; Flags: ignoreversion
 
-; scripts 目录（所有 bat/sh 脚本 + launcher.py）
+; scripts 目录（所有 bat/sh 脚本 + launcher.py + tunnel.py）
 Source: "..\scripts\setup_env.bat"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\setup_env.sh"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\start.bat"; DestDir: "{app}\scripts"; Flags: ignoreversion
@@ -42,6 +42,9 @@ Source: "..\scripts\adduser.bat"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\adduser.sh"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\setup_apikey.bat"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\setup_apikey.sh"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "..\scripts\tunnel.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "..\scripts\tunnel.bat"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "..\scripts\tunnel.sh"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\launcher.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 
 ; 源码

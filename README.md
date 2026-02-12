@@ -171,6 +171,35 @@ python src/front.py
 python test/chat.py
 ```
 
+### 5. 公网部署（可选）
+
+通过 Cloudflare Tunnel 将本地服务一键暴露到公网，无需域名、无需备案，适合临时分享或远程访问。
+
+**集成在一键运行中：**
+
+`run.sh` / `run.bat` 启动服务前会询问"是否部署到公网？"，选择 `y` 即自动完成。
+
+**单独使用：**
+
+```bash
+# Linux / macOS
+bash scripts/tunnel.sh
+
+# Windows
+scripts\tunnel.bat
+
+# 或直接
+python scripts/tunnel.py
+```
+
+脚本会自动：
+1. 检测是否已安装 `cloudflared`（检查 `bin/` 目录和系统 PATH）
+2. 未找到时自动下载到 `bin/` 目录（支持 Linux/macOS + amd64/arm64）
+3. 启动 Cloudflare Tunnel，分配一个 `https://xxx.trycloudflare.com` 临时公网地址
+4. 打印公网地址，按 `Ctrl+C` 关闭隧道
+
+> 每次启动分配的公网地址不同（免费隧道特性）。`bin/` 目录已被 `.gitignore` 排除。
+
 ## 认证机制
 
 系统采用**密码认证 + 双层会话管理**，防止用户伪造身份。
@@ -228,7 +257,11 @@ mini_timebot/
 │   ├── adduser.sh             # 添加用户 (Linux / macOS)
 │   ├── adduser.bat            # 添加用户 (Windows)
 │   ├── setup_apikey.sh        # API Key 配置 (Linux / macOS)
-│   └── setup_apikey.bat       # API Key 配置 (Windows)
+│   ├── setup_apikey.bat       # API Key 配置 (Windows)
+│   ├── tunnel.py              # Cloudflare Tunnel 公网部署（自动下载 cloudflared + 启动隧道）
+│   ├── tunnel.sh              # 公网部署 Shell 包装 (Linux / macOS)
+│   ├── tunnel.bat             # 公网部署 Bat 包装 (Windows)
+│   └── launcher.py            # 跨平台启动器（管理子进程生命周期）
 ├── packaging/                 # 打包发布相关
 │   ├── launcher.py            # exe 启动器源码（调用 run.bat）
 │   ├── build.py               # PyInstaller 打包脚本（Windows）

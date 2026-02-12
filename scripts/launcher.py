@@ -33,28 +33,8 @@ PORT_SCHEDULER = os.getenv("PORT_SCHEDULER", "51201")
 PORT_AGENT = os.getenv("PORT_AGENT", "51200")
 PORT_FRONTEND = os.getenv("PORT_FRONTEND", "51209")
 
-# 确定 Python 解释器路径（优先使用虚拟环境）
-if sys.platform == "win32":
-    venv_path = os.path.join(PROJECT_ROOT, ".venv", "Scripts", "python.exe")
-else:
-    venv_path = os.path.join(PROJECT_ROOT, ".venv", "bin", "python")
-
-venv_python = venv_path if os.path.exists(venv_path) else sys.executable
-
-# 模拟虚拟环境激活：设置环境变量，确保子进程及其孙进程都能找到正确的 Python
-# （等效于 source .venv/bin/activate）
-env = os.environ.copy()
-venv_dir = os.path.join(PROJECT_ROOT, ".venv")
-if os.path.exists(venv_dir):
-    env["VIRTUAL_ENV"] = venv_dir
-    if sys.platform == "win32":
-        venv_bin = os.path.join(venv_dir, "Scripts")
-    else:
-        venv_bin = os.path.join(venv_dir, "bin")
-    # 把虚拟环境的 bin 目录放到 PATH 最前面
-    env["PATH"] = venv_bin + os.pathsep + env.get("PATH", "")
-    # 移除可能干扰的 PYTHONHOME
-    env.pop("PYTHONHOME", None)
+# 使用当前 Python 解释器（虚拟环境已由 run.sh/run.bat 激活）
+venv_python = sys.executable
 
 # 子进程列表
 procs = []
@@ -141,7 +121,6 @@ for msg, script, wait_time in services:
     proc = subprocess.Popen(
         [venv_python, script],
         cwd=PROJECT_ROOT,
-        env=env,      # 传递含虚拟环境的环境变量
         stdout=None,  # 继承父进程的 stdout
         stderr=None,  # 继承父进程的 stderr
     )

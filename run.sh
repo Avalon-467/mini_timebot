@@ -12,6 +12,11 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+# 激活虚拟环境（如果存在），后续所有 python 调用均使用虚拟环境
+if [ -f .venv/bin/activate ]; then
+    source .venv/bin/activate
+fi
+
 echo ""
 echo "========== 2/4 API Key 配置 =========="
 # 建议加上判断，防止配置失败后继续运行
@@ -29,11 +34,6 @@ fi
 
 echo ""
 echo "========== 4/4 启动服务 =========="
-
-# 激活虚拟环境（如果存在）
-if [ -f .venv/bin/activate ]; then
-    source .venv/bin/activate
-fi
 
 # 询问是否部署公网
 read -p "是否部署到公网？(y/N): " tunnel_answer
