@@ -69,9 +69,9 @@ USER_INJECTED_TOOLS = {
 
 class UserAwareToolNode:
     """
-    自定义工具节点：从 RunnableConfig 中读取 thread_id，
-    自动注入为文件管理工具的 username 参数。
-    LLM 不需要传 username，由 config.thread_id 自动提供。
+    自定义工具节点：
+    1. 从 RunnableConfig 中读取 thread_id，自动注入为文件管理工具的 username 参数
+    2. 运行时拦截对禁用工具的调用，返回错误 ToolMessage 而不是实际执行
     """
     def __init__(self, tools):
         self.tool_node = ToolNode(tools)
@@ -83,14 +83,48 @@ class UserAwareToolNode:
         if not hasattr(last_message, "tool_calls") or not last_message.tool_calls:
             return {"messages": []}
 
-        # 深拷贝并注入 username
-        modified_message = copy.deepcopy(last_message)
-        for tc in modified_message.tool_calls:
-            if tc["name"] in USER_INJECTED_TOOLS:
-                tc["args"]["username"] = thread_id
+        # 获取当前启用的工具集合
+        enabled_names = state.get("enabled_tools")  # None means all
+        all_tools = app.state.mcp_tools
+        if enabled_names is not None:
+            enabled_set = set(enabled_names)
+        else:
+            enabled_set = None  # None = all allowed
 
-        modified_state = {**state, "messages": state["messages"][:-1] + [modified_message]}
-        return await self.tool_node.ainvoke(modified_state, config)
+        # 分离被禁用的调用和允许的调用
+        modified_message = copy.deepcopy(last_message)
+        blocked_calls = []
+        allowed_calls = []
+        for tc in modified_message.tool_calls:
+            if enabled_set is not None and tc["name"] not in enabled_set:
+                # This tool is disabled — block it
+                blocked_calls.append(tc)
+                print(f">>> [tools] 🚫 拦截禁用工具调用: {tc['name']}")
+            else:
+                # Allowed — inject username if needed
+                if tc["name"] in USER_INJECTED_TOOLS:
+                    tc["args"]["username"] = thread_id
+                allowed_calls.append(tc)
+
+        result_messages = []
+
+        # For blocked tools, return error ToolMessages directly
+        for tc in blocked_calls:
+            result_messages.append(
+                ToolMessage(
+                    content=f"❌ 工具 '{tc['name']}' 当前已被禁用，无法执行。请用户先在工具面板中启用该工具。",
+                    tool_call_id=tc["id"],
+                )
+            )
+
+        # For allowed tools, execute normally via ToolNode
+        if allowed_calls:
+            modified_message.tool_calls = allowed_calls
+            modified_state = {**state, "messages": state["messages"][:-1] + [modified_message]}
+            tool_result = await self.tool_node.ainvoke(modified_state, config)
+            result_messages.extend(tool_result.get("messages", []))
+
+        return {"messages": result_messages}
 
 
 # --- 1. 定义状态 (State) ---
@@ -98,7 +132,11 @@ class State(TypedDict):
     # 消息列表：使用 add_messages 叠加
     messages: Annotated[list, add_messages]
     # 标记来源：区分 "user" 或 "system"
-    trigger_source: str 
+    trigger_source: str
+    # 用户本轮启用的工具名列表（None 表示全部启用）
+    enabled_tools: Optional[list[str]]
+    # 用户 ID，用于工具状态缓存的 key
+    user_id: Optional[str]
 
 # --- 2. 定义节点 (Nodes) ---
 def get_model():
@@ -132,14 +170,34 @@ def get_model():
 
 async def call_model(state: State):
     """
-    模型调用节点：集成完整参数设置
+    模型调用节点：集成完整参数设置，支持动态工具绑定
     """
-    
 
-    # 获取配置好的模型
-    llm=app.state.sharedllm
-    
-    # 基础系统提示词
+    # 根据 enabled_tools 动态绑定工具
+    all_tools = app.state.mcp_tools
+    enabled_names = state.get("enabled_tools")  # None means all
+    if enabled_names is not None:
+        filtered_tools = [t for t in all_tools if t.name in enabled_names]
+    else:
+        filtered_tools = all_tools
+
+    base_model = get_model()
+    if filtered_tools:
+        llm = base_model.bind_tools(filtered_tools)
+    else:
+        llm = base_model  # no tools bound
+
+    # --- KV Cache 友好的工具状态管理 ---
+    # 策略：默认全量 tool list 写入 base_prompt（固定前缀），只在 tool 状态
+    # 相对于上次发生变化时，才在历史消息末尾插入一条更新通知。
+    # 这样 base_prompt 永远不变，KV Cache 前缀始终命中。
+
+    all_names = sorted(t.name for t in all_tools)
+    # DEBUG: 打印后端已知的全量工具列表
+    print(f">>> [call_model] all_tools_count={len(all_tools)}, all_names={all_names}")
+    all_tool_list_str = ", ".join(all_names)
+
+    # 基础系统提示词（含默认全量 tool list，作为固定前缀）
     base_prompt = (
         "你是一个专业的智能助理，具备以下能力：\n"
         "1. 定时任务管理：可以为用户设置、查看和删除闹钟/定时任务。\n"
@@ -159,14 +217,67 @@ async def call_model(state: State):
         "请主动使用文件管理工具将内容写入用户的文件中。\n"
         "- 当你需要回忆或查询用户之前记录的长期信息时，请使用文件管理工具读取用户的文件。\n"
         "- 当用户要求执行命令、运行代码、查看系统信息等操作时，使用指令执行工具。\n"
-        "- 对于复杂的数据处理任务，优先使用 run_python_code 而非多个 shell 命令。\n"
+        "- 对于复杂的数据处理任务，优先使用 run_python_code 而非多个 shell 命令。\n\n"
+        f"【默认可用工具列表】\n{all_tool_list_str}\n"
+        "以上工具默认全部启用。如果后续有工具状态变更，系统会另行通知。\n"
     )
-    
+
+    # 检测 tool 状态是否相对于上次发生了变化
+    current_enabled = frozenset(enabled_names) if enabled_names is not None else frozenset(all_names)
+    user_id = state.get("user_id", "__global__")
+
+    # DEBUG: 调试日志
+    print(f"\n>>> [call_model] user={user_id}, enabled_names={enabled_names}, "
+          f"current_enabled_count={len(current_enabled)}, "
+          f"last_state={'None' if _user_last_tool_state.get(user_id) is None else len(_user_last_tool_state.get(user_id))}")
+    last_state = _user_last_tool_state.get(user_id)
+
+    tool_status_prompt = ""
+    if last_state is not None and current_enabled != last_state:
+        # Tool 状态发生了变化，生成一条变更通知
+        all_names_set = set(all_names)
+        enabled_set = set(current_enabled)
+        disabled_names = all_names_set - enabled_set
+        tool_status_prompt = (
+            "【工具可用情况更新】\n"
+            f"已启用的工具：{', '.join(sorted(enabled_set & all_names_set)) if (enabled_set & all_names_set) else '无'}\n"
+            f"已禁用的工具：{', '.join(sorted(disabled_names)) if disabled_names else '无'}\n"
+            "请注意：被禁用的工具在本次对话中不可使用。如果用户的请求需要被禁用的工具，"
+            "请礼貌地告知用户需要先启用对应的工具。\n"
+        )
+    elif last_state is None and enabled_names is not None:
+        # 首次请求且用户指定了非全量 tool list，也需要通知
+        all_names_set = set(all_names)
+        enabled_set = set(current_enabled)
+        disabled_names = all_names_set - enabled_set
+        # DEBUG: 详细差异
+        print(f">>> [call_model] all_names_set({len(all_names_set)})={sorted(all_names_set)}")
+        print(f">>> [call_model] enabled_set({len(enabled_set)})={sorted(enabled_set)}")
+        print(f">>> [call_model] disabled_names={sorted(disabled_names)}")
+        if disabled_names:
+            tool_status_prompt = (
+                "【工具可用情况更新】\n"
+                f"已启用的工具：{', '.join(sorted(enabled_set & all_names_set)) if (enabled_set & all_names_set) else '无'}\n"
+                f"已禁用的工具：{', '.join(sorted(disabled_names))}\n"
+                "请注意：被禁用的工具在本次对话中不可使用。如果用户的请求需要被禁用的工具，"
+                "请礼貌地告知用户需要先启用对应的工具。\n"
+            )
+
+    # DEBUG: 变更检测结果
+    if tool_status_prompt:
+        print(f">>> [call_model] ⚡ Tool状态变更检测到！prompt长度={len(tool_status_prompt)}")
+    else:
+        print(f">>> [call_model] Tool状态未变化，无额外prompt")
+
+    # 更新缓存
+    _user_last_tool_state[user_id] = current_enabled
+
+    history_messages = list(state["messages"])
+
     # 针对系统触发（外部定时）的特殊逻辑
     if state.get("trigger_source") == "system":
-        # 构造一个临时的总结指令，不进入历史记录
         summary_prompt = "【系统指令】：请对该用户之前的对话进行核心诉求总结，供管理员参考。"
-        input_messages = [SystemMessage(content=base_prompt), SystemMessage(content=summary_prompt)] + state["messages"]
+        input_messages = [SystemMessage(content=base_prompt), SystemMessage(content=summary_prompt)] + history_messages
         
         response = await llm.ainvoke(input_messages)
         
@@ -176,7 +287,26 @@ async def call_model(state: State):
         return {} 
 
     # 针对用户触发的正常对话逻辑
-    input_messages = [SystemMessage(content=base_prompt)] + state["messages"]
+    # KV Cache 优化：base_prompt 固定前缀 + 历史消息（都能 cache）
+    # 仅当 tool 状态变化时，在末尾插入更新通知（开销极小）
+    #
+    # 注意：不能在 user/assistant 序列中间插入 SystemMessage，
+    # 很多 LLM API 只识别开头的 SystemMessage，中间的会被忽略。
+    # 改为将 tool_status_prompt 注入到最后一条用户消息的内容前面，
+    # 这样 LLM 一定能看到，且不破坏消息序列结构。
+    if tool_status_prompt and len(history_messages) >= 1:
+        last_msg = history_messages[-1]
+        # 将工具变更通知注入到最后一条用户消息内容前
+        augmented_content = f"[系统通知] {tool_status_prompt}\n\n---\n{last_msg.content}"
+        augmented_msg = HumanMessage(content=augmented_content)
+        input_messages = (
+            [SystemMessage(content=base_prompt)]
+            + history_messages[:-1]
+            + [augmented_msg]
+        )
+    else:
+        input_messages = [SystemMessage(content=base_prompt)] + history_messages
+
     response = await llm.ainvoke(input_messages)
     
     return {"messages": [response]}
@@ -218,7 +348,6 @@ async def lifespan(app: FastAPI):
         # get_tools() 会自动启动子进程并获取定义的 @mcp.tool()
         tools = await client.get_tools()
         app.state.mcp_tools = tools # 存起来备用
-        app.state.sharedllm= get_model().bind_tools(app.state.mcp_tools)
 
 
                 # --- 3. 构建工作流 (Workflow) ---
@@ -253,6 +382,11 @@ app = FastAPI(lifespan=lifespan)
 _active_tasks: dict[str, asyncio.Task] = {}
 _task_lock = asyncio.Lock()
 
+# --- 用户级工具状态缓存 ---
+# key: user_id, value: 上次已知的 enabled tool names frozenset
+# 用于检测 tool list 是否发生变化，避免每次都插入 tool_status 消息
+_user_last_tool_state: dict[str, frozenset[str]] = {}
+
 async def _cancel_and_wait(user_id: str):
     """取消指定用户的活跃任务并等待其结束"""
     task = _active_tasks.get(user_id)
@@ -274,6 +408,7 @@ class UserRequest(BaseModel):
     user_id: str
     password: str
     text: str
+    enabled_tools: Optional[list[str]] = None  # None means all tools enabled
 
 class SystemTriggerRequest(BaseModel):
     user_id: str
@@ -310,7 +445,9 @@ async def ask_agent(req: UserRequest):
     
     user_input = {
         "messages": [HumanMessage(content=req.text)],
-        "trigger_source": "user"
+        "trigger_source": "user",
+        "enabled_tools": req.enabled_tools,
+        "user_id": req.user_id,
     }
     
     result = await agent_app.ainvoke(user_input, config)
@@ -334,8 +471,13 @@ async def ask_agent_stream(req: UserRequest):
 
     user_input = {
         "messages": [HumanMessage(content=req.text)],
-        "trigger_source": "user"
+        "trigger_source": "user",
+        "enabled_tools": req.enabled_tools,
+        "user_id": req.user_id,
     }
+
+    # DEBUG: API 层日志
+    print(f"\n>>> [/ask_stream] user={req.user_id}, enabled_tools={req.enabled_tools}")
 
     # 用 asyncio.Queue 在 Task 和生成器之间传递 SSE 数据
     queue: asyncio.Queue[str | None] = asyncio.Queue()

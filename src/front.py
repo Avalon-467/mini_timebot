@@ -44,8 +44,11 @@ HTML_TEMPLATE = """
         .tool-panel { transition: max-height 0.3s ease, opacity 0.3s ease; overflow: hidden; }
         .tool-panel.collapsed { max-height: 0; opacity: 0; }
         .tool-panel.expanded { max-height: 300px; opacity: 1; overflow-y: auto; }
-        .tool-tag { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 9999px; font-size: 12px; background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; cursor: default; transition: background 0.2s; }
-        .tool-tag:hover { background: #dbeafe; }
+        .tool-tag { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 9999px; font-size: 12px; cursor: pointer; user-select: none; transition: all 0.25s ease; }
+        .tool-tag.enabled { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+        .tool-tag.enabled:hover { background: #dbeafe; }
+        .tool-tag.disabled { background: #f3f4f6; color: #9ca3af; border: 1px solid #e5e7eb; opacity: 0.65; }
+        .tool-tag.disabled:hover { background: #e5e7eb; opacity: 0.8; }
         .tool-toggle-btn { cursor: pointer; user-select: none; transition: color 0.2s; }
         .tool-toggle-btn:hover { color: #2563eb; }
         .tool-toggle-icon { display: inline-block; transition: transform 0.3s ease; }
@@ -228,6 +231,8 @@ HTML_TEMPLATE = """
 
         // ===== Tool Panel 逻辑 =====
         let toolPanelOpen = false;
+        let allTools = [];       // [{name, description}]
+        let enabledToolSet = new Set(); // 当前启用的工具名集合
 
         function toggleToolPanel() {
             const panel = document.getElementById('tool-panel');
@@ -244,6 +249,30 @@ HTML_TEMPLATE = """
             }
         }
 
+        function updateToolCount() {
+            const toolCount = document.getElementById('tool-count');
+            toolCount.textContent = '(' + enabledToolSet.size + '/' + allTools.length + ')';
+        }
+
+        function toggleTool(name, tagEl) {
+            if (enabledToolSet.has(name)) {
+                enabledToolSet.delete(name);
+                tagEl.classList.remove('enabled');
+                tagEl.classList.add('disabled');
+            } else {
+                enabledToolSet.add(name);
+                tagEl.classList.remove('disabled');
+                tagEl.classList.add('enabled');
+            }
+            updateToolCount();
+        }
+
+        function getEnabledTools() {
+            // If all tools enabled, return null (means "all")
+            if (enabledToolSet.size === allTools.length) return null;
+            return Array.from(enabledToolSet);
+        }
+
         async function loadTools() {
             try {
                 const resp = await fetch('/proxy_tools');
@@ -251,7 +280,6 @@ HTML_TEMPLATE = """
                 const data = await resp.json();
                 const tools = data.tools || [];
                 const toolList = document.getElementById('tool-list');
-                const toolCount = document.getElementById('tool-count');
                 const wrapper = document.getElementById('tool-panel-wrapper');
 
                 if (tools.length === 0) {
@@ -259,15 +287,18 @@ HTML_TEMPLATE = """
                     return;
                 }
 
-                toolCount.textContent = '(' + tools.length + ')';
+                allTools = tools;
+                enabledToolSet = new Set(tools.map(t => t.name)); // default: all enabled
                 toolList.innerHTML = '';
                 tools.forEach(t => {
                     const tag = document.createElement('span');
-                    tag.className = 'tool-tag';
+                    tag.className = 'tool-tag enabled';
                     tag.title = t.description || '';
                     tag.textContent = t.name;
+                    tag.onclick = () => toggleTool(t.name, tag);
                     toolList.appendChild(tag);
                 });
+                updateToolCount();
                 wrapper.style.display = 'block';
             } catch (e) {
                 console.warn('Failed to load tools:', e);
@@ -377,7 +408,7 @@ HTML_TEMPLATE = """
                 const response = await fetch("/proxy_ask_stream", {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ content: text }),
+                    body: JSON.stringify({ content: text, enabled_tools: getEnabledTools() }),
                     signal: currentAbortController.signal
                 });
 
@@ -525,10 +556,12 @@ def proxy_ask_stream():
         return jsonify({"error": "未登录"}), 401
 
     user_content = request.json.get("content")
+    enabled_tools = request.json.get("enabled_tools")  # None or list
     payload = {
         "user_id": user_id,
         "password": password,
-        "text": user_content
+        "text": user_content,
+        "enabled_tools": enabled_tools,
     }
 
     try:
