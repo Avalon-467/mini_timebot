@@ -19,7 +19,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 # 模型相关
 from langchain_deepseek import ChatDeepSeek
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -346,7 +346,27 @@ async def ask_agent_stream(req: UserRequest):
                     await queue.put(f"data: \\n✅ 工具执行完成\\n\n\n")
             await queue.put("data: [DONE]\n\n")
         except asyncio.CancelledError:
-            # 终止时，将已收集的 token 作为 AIMessage 写入 checkpoint
+            # 终止时，需要修复 checkpoint 中可能不完整的消息序列
+            try:
+                snapshot = await agent_app.aget_state(config)
+                last_msgs = snapshot.values.get("messages", [])
+                if last_msgs:
+                    last_msg = last_msgs[-1]
+                    # 如果最后一条消息是带 tool_calls 的 AIMessage，
+                    # 必须补充对应的 ToolMessage，否则下次提问时 LLM 会报错
+                    if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
+                        tool_messages = [
+                            ToolMessage(
+                                content="⚠️ 工具调用被用户终止",
+                                tool_call_id=tc["id"],
+                            )
+                            for tc in last_msg.tool_calls
+                        ]
+                        await agent_app.aupdate_state(config, {"messages": tool_messages})
+            except Exception:
+                pass  # 修复失败不影响终止流程
+
+            # 保存已收集的部分 token
             partial_text = "".join(collected_tokens)
             if partial_text:
                 partial_text += "\n\n⚠️ （回复被用户终止）"
