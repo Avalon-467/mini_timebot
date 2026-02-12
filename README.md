@@ -231,8 +231,10 @@ mini_timebot/
 │   └── setup_apikey.bat       # API Key 配置 (Windows)
 ├── packaging/                 # 打包发布相关
 │   ├── launcher.py            # exe 启动器源码（调用 run.bat）
-│   ├── build.py               # PyInstaller 打包脚本
-│   └── installer.iss          # Inno Setup 安装包脚本
+│   ├── build.py               # PyInstaller 打包脚本（Windows）
+│   ├── build_dmg.sh           # macOS .app + DMG 打包脚本
+│   ├── icon.png               # 应用图标源文件
+│   └── installer.iss          # Inno Setup 安装包脚本（Windows）
 ├── config/
 │   ├── .env               # 环境变量配置（需自行创建，不纳入版本控制）
 │   ├── requirements.txt   # Python 依赖列表
@@ -303,11 +305,13 @@ Agent 通过 `mcp_filemanager.py` 提供文件管理能力，支持 5 个操作�
 | `chat.py` | 命令行交互式聊天客户端，通过 HTTP 向 Agent 发送请求 | `python test/chat.py` |
 | `view_history.py` | 读取 `agent_memory.db`，查看历史聊天记录 | `python test/view_history.py [--user USER_ID] [--limit N]` |
 
-## 打包发布（Windows 安装包）
+## 打包发布
+
+### Windows 安装包
 
 将项目打包为 Windows 安装包，用户双击桌面快捷方式即可运行（exe 本质是 `run.bat` 的启动器壳）。
 
-### 打包步骤
+**打包步骤：**
 
 ```bash
 # 1. 安装 PyInstaller
@@ -328,6 +332,64 @@ python packaging/build.py
 - 支持卸载
 
 > exe 仅作为 `run.bat` 的快捷方式入口，不改变任何业务逻辑。所有源码保持 `.py` 格式，可随时修改。
+
+### macOS 应用包（.app + DMG）
+
+将项目打包为标准的 macOS `.app` 应用包，并生成 `.dmg` 安装镜像。用户双击 `.app` 即可在终端中自动启动所有服务。
+
+**打包步骤：**
+
+```bash
+# 一键打包（在项目根目录执行）
+bash packaging/build_dmg.sh
+```
+
+脚本会自动完成以下流程：
+
+1. **构建 `.app` 应用包** — 创建标准 macOS 应用结构（`Contents/MacOS/launch` 启动器 + `Contents/Resources/` 项目文件 + `Info.plist` 元数据）
+2. **复制项目文件** — 将 `run.sh`、`scripts/`（仅 `.sh`）、`src/`、`tools/`、`config/` 模板等复制到 `Resources/`
+3. **生成应用图标** — 从 `packaging/icon.png` 自动生成 `.icns` 图标（使用 `sips` + `iconutil`）
+4. **创建 DMG 镜像** — 使用 `hdiutil` 生成带 Applications 快捷方式的 `.dmg` 安装镜像
+
+**产出物：**
+
+| 文件 | 路径 | 说明 |
+|------|------|------|
+| `.dmg` 安装镜像 | `dist/MiniTimeBot_1.0.0.dmg` | macOS 上打包时生成，可直接分发 |
+| `.tar.gz` 压缩包 | `dist/MiniTimeBot_1.0.0_macos.tar.gz` | 非 macOS 系统上打包时生成（替代 DMG） |
+
+**用户安装与使用：**
+
+1. 双击 `.dmg` 文件挂载磁盘镜像
+2. 将 `MiniTimeBot.app` 拖入「应用程序」文件夹
+3. 首次打开时如遇"无法验证开发者"提示：
+   - 右键点击 `.app` → 选择「打开」→ 确认「打开」
+   - 或在终端执行：`xattr -cr /Applications/MiniTimeBot.app`
+4. 之后双击图标即可启动，服务会在终端中运行
+5. 启动后访问 http://127.0.0.1:51209 使用
+
+**`.app` 内部结构：**
+
+```
+MiniTimeBot.app/
+└── Contents/
+    ├── Info.plist          ← 应用元数据（名称、版本、图标等）
+    ├── MacOS/
+    │   └── launch          ← 启动器脚本（通过 osascript 在 Terminal.app 中运行 run.sh）
+    └── Resources/          ← 完整项目文件
+        ├── run.sh
+        ├── scripts/
+        ├── src/
+        ├── tools/
+        ├── config/         ← 仅包含模板（.env.example, users.json.example, requirements.txt）
+        └── data/           ← 空目录结构，运行时自动填充
+```
+
+**注意事项：**
+- 打包脚本会自动检测运行平台：macOS 上生成 `.dmg`，其他系统生成 `.tar.gz`
+- 如需自定义图标，替换 `packaging/icon.png`（建议正方形 PNG，至少 512×512）
+- `.app` 本质是 `run.sh` 的包装，所有源码保持 `.py` 格式，可在 `Resources/` 中直接修改
+- 首次启动时 `run.sh` 会自动引导用户完成环境配置、API Key 设置和用户创建
 
 ## 技术栈
 
