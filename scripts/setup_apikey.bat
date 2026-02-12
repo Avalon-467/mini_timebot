@@ -19,11 +19,18 @@ if "%CURRENT_KEY%"=="your_api_key_here" goto ask_key
 :: Key 已存在，显示部分内容并询问
 set "KEY_PREFIX=%CURRENT_KEY:~0,8%"
 echo [OK] API Key 已配置（%KEY_PREFIX%...）
-set /p RESET=是否重新配置？(y/N): 
+
+:: 解决方法：先 echo 提示语，再进行 set /p
+echo.
+echo 是否重新配置？(y/N)
+set /p RESET="> "
+
 if /i not "%RESET%"=="y" (
-    echo    保持现有配置
+    echo     保持现有配置
+    timeout /t 2 >nul
     exit /b 0
 )
+
 
 :ask_key
 echo ================================================
