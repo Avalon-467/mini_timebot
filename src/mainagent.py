@@ -105,6 +105,7 @@ class UserAwareToolNode:
                 if tc["name"] in USER_INJECTED_TOOLS:
                     tc["args"]["username"] = thread_id
                 allowed_calls.append(tc)
+                print(f">>> [tools] ✅ 调用工具: {tc['name']}")
 
         result_messages = []
 
@@ -193,8 +194,6 @@ async def call_model(state: State):
     # 这样 base_prompt 永远不变，KV Cache 前缀始终命中。
 
     all_names = sorted(t.name for t in all_tools)
-    # DEBUG: 打印后端已知的全量工具列表
-    print(f">>> [call_model] all_tools_count={len(all_tools)}, all_names={all_names}")
     all_tool_list_str = ", ".join(all_names)
 
     # 基础系统提示词（含默认全量 tool list，作为固定前缀）
@@ -226,10 +225,6 @@ async def call_model(state: State):
     current_enabled = frozenset(enabled_names) if enabled_names is not None else frozenset(all_names)
     user_id = state.get("user_id", "__global__")
 
-    # DEBUG: 调试日志
-    print(f"\n>>> [call_model] user={user_id}, enabled_names={enabled_names}, "
-          f"current_enabled_count={len(current_enabled)}, "
-          f"last_state={'None' if _user_last_tool_state.get(user_id) is None else len(_user_last_tool_state.get(user_id))}")
     last_state = _user_last_tool_state.get(user_id)
 
     tool_status_prompt = ""
@@ -250,10 +245,6 @@ async def call_model(state: State):
         all_names_set = set(all_names)
         enabled_set = set(current_enabled)
         disabled_names = all_names_set - enabled_set
-        # DEBUG: 详细差异
-        print(f">>> [call_model] all_names_set({len(all_names_set)})={sorted(all_names_set)}")
-        print(f">>> [call_model] enabled_set({len(enabled_set)})={sorted(enabled_set)}")
-        print(f">>> [call_model] disabled_names={sorted(disabled_names)}")
         if disabled_names:
             tool_status_prompt = (
                 "【工具可用情况更新】\n"
@@ -262,12 +253,6 @@ async def call_model(state: State):
                 "请注意：被禁用的工具在本次对话中不可使用。如果用户的请求需要被禁用的工具，"
                 "请礼貌地告知用户需要先启用对应的工具。\n"
             )
-
-    # DEBUG: 变更检测结果
-    if tool_status_prompt:
-        print(f">>> [call_model] ⚡ Tool状态变更检测到！prompt长度={len(tool_status_prompt)}")
-    else:
-        print(f">>> [call_model] Tool状态未变化，无额外prompt")
 
     # 更新缓存
     _user_last_tool_state[user_id] = current_enabled
@@ -476,8 +461,7 @@ async def ask_agent_stream(req: UserRequest):
         "user_id": req.user_id,
     }
 
-    # DEBUG: API 层日志
-    print(f"\n>>> [/ask_stream] user={req.user_id}, enabled_tools={req.enabled_tools}")
+
 
     # 用 asyncio.Queue 在 Task 和生成器之间传递 SSE 数据
     queue: asyncio.Queue[str | None] = asyncio.Queue()
