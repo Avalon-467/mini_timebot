@@ -29,5 +29,17 @@ fi
 
 echo ""
 echo "========== 4/4 启动服务 =========="
+
+# 询问是否部署公网
+read -p "是否部署到公网？(y/N): " tunnel_answer
+if [[ "$tunnel_answer" =~ ^[Yy]$ ]]; then
+    echo "🌐 正在后台启动 Cloudflare Tunnel..."
+    python scripts/tunnel.py &
+    TUNNEL_PID=$!
+    # 确保主进程退出时也关闭隧道
+    trap "kill $TUNNEL_PID 2>/dev/null" EXIT
+    sleep 2
+fi
+
 # exec 替换当前进程，确保信号（Ctrl+C、kill、终端关闭）直达 launcher.py
 exec python scripts/launcher.py
