@@ -57,8 +57,13 @@ def verify_password(username: str, password: str) -> bool:
     pw_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
     return pw_hash == users[username]
 
-# 文件管理工具名称集合（需要自动注入 username 的工具）
-FILE_TOOLS = {"list_files", "read_file", "write_file", "append_file", "delete_file"}
+# 需要自动注入 username 的工具集合（文件管理 + 指令执行）
+USER_INJECTED_TOOLS = {
+    # 文件管理工具
+    "list_files", "read_file", "write_file", "append_file", "delete_file",
+    # 指令执行工具
+    "run_command", "run_python_code",
+}
 
 
 class UserAwareToolNode:
@@ -80,7 +85,7 @@ class UserAwareToolNode:
         # 深拷贝并注入 username
         modified_message = copy.deepcopy(last_message)
         for tc in modified_message.tool_calls:
-            if tc["name"] in FILE_TOOLS:
+            if tc["name"] in USER_INJECTED_TOOLS:
                 tc["args"]["username"] = thread_id
 
         modified_state = {**state, "messages": state["messages"][:-1] + [modified_message]}
@@ -140,13 +145,20 @@ async def call_model(state: State):
         "2. 联网搜索：当用户询问实时信息、新闻或需要查询资料时，请主动使用搜索工具。\n"
         "3. 文件管理：可以为用户创建、读取、追加、删除和列出文件。"
         "调用文件管理工具（list_files, read_file, write_file, append_file, delete_file）时，"
-        "username 参数由系统自动注入，你不需要也不应该提供该参数。\n\n"
+        "username 参数由系统自动注入，你不需要也不应该提供该参数。\n"
+        "4. 指令执行：可以在用户的安全沙箱目录中执行系统命令和 Python 代码。\n"
+        "   - run_command：执行 shell 命令（ls、grep、cat、curl 等白名单内的命令）\n"
+        "   - run_python_code：执行 Python 代码片段（数据计算、文本处理等）\n"
+        "   - list_allowed_commands：查看允许执行的命令白名单\n"
+        "   调用 run_command 和 run_python_code 时，username 参数由系统自动注入，你不需要也不应该提供该参数。\n\n"
         "【工具使用规则】\n"
         "- 只有当用户明确要求【测试工具】或【测试tool】时，才对工具进行测试性调用。"
         "日常对话中不要主动测试工具。\n"
         "- 当用户要求你记录、保存、备忘某些事情，或者你判断对话中出现了重要信息值得长期保留时，"
         "请主动使用文件管理工具将内容写入用户的文件中。\n"
         "- 当你需要回忆或查询用户之前记录的长期信息时，请使用文件管理工具读取用户的文件。\n"
+        "- 当用户要求执行命令、运行代码、查看系统信息等操作时，使用指令执行工具。\n"
+        "- 对于复杂的数据处理任务，优先使用 run_python_code 而非多个 shell 命令。\n"
     )
     
     # 针对系统触发（外部定时）的特殊逻辑
@@ -192,6 +204,11 @@ async def lifespan(app: FastAPI):
             "file_service": {
                 "command": "python",
                 "args": [os.path.join(current_dir, "mcp_filemanager.py")],
+                "transport": "stdio"
+            },
+            "commander_service": {
+                "command": "python",
+                "args": [os.path.join(current_dir, "mcp_commander.py")],
                 "transport": "stdio"
             }
         })

@@ -123,9 +123,9 @@ echo "  📦 复制项目文件到 Resources..."
 cp "${ROOT}/run.sh" "${RESOURCES}/"
 chmod +x "${RESOURCES}/run.sh"
 
-# scripts 目录（仅 .sh 文件）
+# scripts 目录（.sh + launcher.py）
 mkdir -p "${RESOURCES}/scripts"
-for f in setup_env.sh start.sh adduser.sh setup_apikey.sh; do
+for f in setup_env.sh start.sh adduser.sh setup_apikey.sh launcher.py; do
     if [ -f "${ROOT}/scripts/${f}" ]; then
         cp "${ROOT}/scripts/${f}" "${RESOURCES}/scripts/"
         chmod +x "${RESOURCES}/scripts/${f}"
@@ -229,6 +229,7 @@ cat > "${BUILD_DIR}/使用说明.txt" << 'GUIDE'
 
 【访问地址】
   启动后浏览器打开: http://127.0.0.1:51209
+  （端口可在 config/.env 中自定义 PORT_FRONTEND）
 
 【停止服务】
   在终端中按 Ctrl+C
