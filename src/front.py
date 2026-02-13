@@ -168,8 +168,10 @@ HTML_TEMPLATE = """
             .oasis-panel.mobile-open { display: flex !important; }
             .oasis-panel.collapsed-panel { display: none !important; }
             .oasis-panel .oasis-expand-btn { display: none !important; }
-            /* Mobile OASIS open button in header */
-            .mobile-oasis-btn { display: inline-flex !important; }
+            /* Mobile: hide UID & session, hide desktop buttons, show hamburger */
+            #uid-display, #session-display { display: none !important; }
+            .desktop-only-btn { display: none !important; }
+            .mobile-menu-btn { display: inline-flex !important; }
             /* Header: stack items on narrow screens */
             .mobile-header-top { flex-wrap: wrap; gap: 6px; }
             .mobile-header-actions { flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
@@ -179,8 +181,24 @@ HTML_TEMPLATE = """
         }
         /* Hide mobile-only elements on desktop */
         @media (min-width: 769px) {
-            .mobile-oasis-btn { display: none !important; }
+            .mobile-menu-wrapper { display: none !important; }
         }
+        /* Mobile menu dropdown styles */
+        .mobile-menu-btn { display: none; }
+        .mobile-menu-dropdown {
+            position: absolute; right: 0; top: 100%; margin-top: 6px;
+            background: white; border: 1px solid #e5e7eb; border-radius: 10px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.12); z-index: 100;
+            min-width: 140px; overflow: hidden;
+        }
+        .mobile-menu-item {
+            display: block; width: 100%; text-align: left;
+            padding: 10px 14px; font-size: 13px; color: #374151;
+            border: none; background: none; cursor: pointer;
+            transition: background 0.15s;
+        }
+        .mobile-menu-item:hover, .mobile-menu-item:active { background: #f3f4f6; }
+        .mobile-menu-item + .mobile-menu-item { border-top: 1px solid #f3f4f6; }
         .oasis-divider { width: 1px; background: #e5e7eb; cursor: col-resize; flex-shrink: 0; }
         .oasis-divider:hover { background: #3b82f6; width: 3px; }
     </style>
@@ -238,9 +256,18 @@ HTML_TEMPLATE = """
                 <div class="flex items-center space-x-1 sm:space-x-2 mobile-header-actions flex-shrink-0">
                     <div id="uid-display" class="text-xs sm:text-sm font-mono bg-gray-100 px-2 sm:px-3 py-1 rounded border truncate max-w-[80px] sm:max-w-none"></div>
                     <div id="session-display" class="text-[10px] sm:text-xs font-mono bg-blue-50 text-blue-600 px-1.5 sm:px-2 py-1 rounded border border-blue-200 cursor-default" title="当前对话号"></div>
-                    <button onclick="handleNewSession()" class="text-[10px] sm:text-xs bg-green-50 text-green-600 hover:bg-green-100 px-1.5 sm:px-2 py-1 rounded border border-green-200 transition-colors" title="开启新对话">+新</button>
-                    <button onclick="handleLogout()" class="text-[10px] sm:text-xs text-gray-400 hover:text-red-500 px-1.5 sm:px-2 py-1 rounded transition-colors" title="切换用户">退出</button>
-                    <button onclick="toggleOasisMobile()" class="mobile-oasis-btn text-[10px] bg-purple-50 text-purple-600 hover:bg-purple-100 px-1.5 py-1 rounded border border-purple-200 transition-colors" title="OASIS讨论">🏛️</button>
+                    <!-- Desktop: show all buttons inline -->
+                    <button onclick="handleNewSession()" class="desktop-only-btn text-[10px] sm:text-xs bg-green-50 text-green-600 hover:bg-green-100 px-1.5 sm:px-2 py-1 rounded border border-green-200 transition-colors" title="开启新对话">+新</button>
+                    <button onclick="handleLogout()" class="desktop-only-btn text-[10px] sm:text-xs text-gray-400 hover:text-red-500 px-1.5 sm:px-2 py-1 rounded transition-colors" title="切换用户">退出</button>
+                    <!-- Mobile: hamburger menu -->
+                    <div class="mobile-menu-wrapper" style="position:relative;">
+                        <button onclick="toggleMobileMenu()" class="mobile-menu-btn text-[10px] bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded border border-gray-300 transition-colors" title="更多操作">⋮</button>
+                        <div id="mobile-menu-dropdown" class="mobile-menu-dropdown" style="display:none;">
+                            <button onclick="handleNewSession(); closeMobileMenu();" class="mobile-menu-item">➕ 新对话</button>
+                            <button onclick="toggleOasisMobile(); closeMobileMenu();" class="mobile-menu-item">🏛️ OASIS</button>
+                            <button onclick="handleLogout(); closeMobileMenu();" class="mobile-menu-item text-red-500">🚪 退出</button>
+                        </div>
+                    </div>
                 </div>
             </header>
 
@@ -292,7 +319,7 @@ HTML_TEMPLATE = """
         <div class="oasis-divider" id="oasis-divider"></div>
 
         <!-- ===== 右侧：OASIS 讨论面板 ===== -->
-        <div class="oasis-panel bg-white border-l border-gray-200 flex flex-col h-screen" id="oasis-panel">
+        <div class="oasis-panel collapsed-panel bg-white border-l border-gray-200 flex flex-col h-screen" id="oasis-panel">
             <!-- Collapsed state expand button -->
             <div class="oasis-expand-btn items-center justify-center h-full text-gray-400 hover:text-blue-600 cursor-pointer text-sm font-bold" onclick="toggleOasisPanel()">
                 🏛️ O A S I S
@@ -766,7 +793,7 @@ HTML_TEMPLATE = """
         // ===== OASIS 讨论面板逻辑 =====
         // ================================================================
 
-        let oasisPanelOpen = true;
+        let oasisPanelOpen = false;
         let oasisCurrentTopicId = null;
         let oasisPollingTimer = null;
         let oasisStreamReader = null;
@@ -822,6 +849,24 @@ HTML_TEMPLATE = """
                 panel.classList.add('mobile-open');
                 refreshOasisTopics();
             }
+        }
+
+        function toggleMobileMenu() {
+            const dd = document.getElementById('mobile-menu-dropdown');
+            if (dd.style.display === 'none') {
+                dd.style.display = 'block';
+                // close when tapping outside
+                setTimeout(() => document.addEventListener('click', closeMobileMenuOutside, { once: true }), 0);
+            } else {
+                dd.style.display = 'none';
+            }
+        }
+        function closeMobileMenu() {
+            document.getElementById('mobile-menu-dropdown').style.display = 'none';
+        }
+        function closeMobileMenuOutside(e) {
+            const wrapper = document.querySelector('.mobile-menu-wrapper');
+            if (!wrapper.contains(e.target)) closeMobileMenu();
         }
 
         function stopOasisPolling() {
