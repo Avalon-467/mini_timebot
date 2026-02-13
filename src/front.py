@@ -116,8 +116,18 @@ HTML_TEMPLATE = """
         @keyframes slideDown { from { transform: translateY(-100%); } to { transform: translateY(0); } }
 
         /* Fixed header height - input area auto-sizes */
-        header { flex-shrink: 0; height: var(--header-height, 60px); min-height: var(--header-height, 60px); }
-        .p-2.sm\:p-4.border-t { flex-shrink: 0; min-height: 60px; }
+        header { 
+            flex-shrink: 0; 
+            height: auto; 
+            min-height: calc(var(--header-height, 60px) + var(--safe-top)); 
+            padding-top: var(--safe-top);
+            z-index: 50;
+        }
+        .p-2.sm\:p-4.border-t { 
+            flex-shrink: 0; 
+            min-height: calc(60px + var(--safe-bottom));
+            padding-bottom: var(--safe-bottom);
+        }
 
         .chat-container { flex: 1; min-height: 0; overflow-y: auto; }
         .markdown-body pre { background: #1e1e1e; padding: 1rem; border-radius: 0.5rem; margin: 0.5rem 0; overflow-x: auto; }
@@ -175,19 +185,21 @@ HTML_TEMPLATE = """
         @media (max-width: 768px) {
             .main-layout { flex-direction: column; height: var(--app-height, 100vh); overflow: hidden; }
             .chat-main { max-width: 100%; width: 100%; height: var(--app-height, 100vh); }
-            /* Header: fixed at top - MUST have explicit height */
+            /* Header: fixed at top - auto height for safe area */
             header { 
                 flex-shrink: 0; 
-                height: var(--header-height, 60px); 
-                min-height: var(--header-height, 60px);
-                overflow: hidden;
+                height: auto; 
+                min-height: calc(var(--header-height, 60px) + var(--safe-top));
+                padding-top: var(--safe-top);
+                overflow: visible;
             }
             /* Chat container: scrollable middle area */
             .chat-container { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
             /* Input area: fixed at bottom - auto height */
             .p-2.sm\:p-4.border-t { 
                 flex-shrink: 0; 
-                min-height: 60px;
+                min-height: calc(60px + var(--safe-bottom));
+                padding-bottom: var(--safe-bottom);
             }
             /* OASIS: overlay mode on mobile */
             .oasis-divider { display: none !important; }
@@ -292,8 +304,11 @@ HTML_TEMPLATE = """
                 <div class="flex items-center space-x-1 sm:space-x-2 mobile-header-actions flex-shrink-0">
                     <div id="uid-display" class="text-xs sm:text-sm font-mono bg-gray-100 px-2 sm:px-3 py-1 rounded border truncate max-w-[80px] sm:max-w-none"></div>
                     <div id="session-display" class="text-[10px] sm:text-xs font-mono bg-blue-50 text-blue-600 px-1.5 sm:px-2 py-1 rounded border border-blue-200 cursor-default" title="当前对话号"></div>
-                    <!-- Desktop: show all buttons inline -->
-                    <button onclick="handleNewSession()" class="desktop-only-btn text-[10px] sm:text-xs bg-green-50 text-green-600 hover:bg-green-100 px-1.5 sm:px-2 py-1 rounded border border-green-200 transition-colors" title="开启新对话">+新</button>
+                    <!-- New Session Button: Visible on all devices -->
+                    <button onclick="handleNewSession()" class="text-[10px] sm:text-xs bg-green-50 text-green-600 hover:bg-green-100 px-2 py-1 rounded border border-green-200 transition-colors mr-1 flex items-center justify-center" title="开启新对话">
+                        <span class="sm:hidden text-base font-bold leading-none">+</span>
+                        <span class="hidden sm:inline">+新</span>
+                    </button>
                     <button onclick="handleLogout()" class="desktop-only-btn text-[10px] sm:text-xs text-gray-400 hover:text-red-500 px-1.5 sm:px-2 py-1 rounded transition-colors" title="切换用户">退出</button>
                     <!-- Mobile: hamburger menu -->
                     <div class="mobile-menu-wrapper" style="position:relative;">
@@ -1253,26 +1268,15 @@ HTML_TEMPLATE = """
                 // Update CSS variable for app height
                 document.documentElement.style.setProperty('--app-height', availableHeight + 'px');
                 
-                // Ensure header keeps its height
-                const headerHeight = 60;
-                
-                if (header) {
-                    header.style.height = headerHeight + 'px';
-                    header.style.minHeight = headerHeight + 'px';
-                    header.style.flexShrink = '0';
-                }
-                
-                // Input area: only set flex-shrink, let it auto-size
-                if (inputArea) {
-                    inputArea.style.flexShrink = '0';
-                    // Don't set fixed height - let it auto-size based on content
-                }
-                
                 // Chat main takes full available height
                 if (chatMain) {
                     chatMain.style.height = availableHeight + 'px';
                     chatMain.style.maxHeight = availableHeight + 'px';
                 }
+                
+                // Ensure flex behavior
+                if (header) header.style.flexShrink = '0';
+                if (inputArea) inputArea.style.flexShrink = '0';
                 
                 // Chat container gets remaining space via flex
                 if (chatContainer) {
@@ -1283,19 +1287,13 @@ HTML_TEMPLATE = """
                 // Normal mode: reset to CSS defaults
                 document.documentElement.style.removeProperty('--app-height');
                 
-                if (header) {
-                    header.style.height = '';
-                    header.style.minHeight = '';
-                }
-                
-                if (inputArea) {
-                    inputArea.style.flexShrink = '';
-                }
-                
                 if (chatMain) {
                     chatMain.style.height = '';
                     chatMain.style.maxHeight = '';
                 }
+                
+                if (header) header.style.flexShrink = '';
+                if (inputArea) inputArea.style.flexShrink = '';
                 
                 if (chatContainer) {
                     chatContainer.style.flex = '';
