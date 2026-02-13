@@ -115,9 +115,9 @@ HTML_TEMPLATE = """
         #offline-banner.show { display: block; animation: slideDown 0.3s ease; }
         @keyframes slideDown { from { transform: translateY(-100%); } to { transform: translateY(0); } }
 
-        /* Fixed header and footer heights */
+        /* Fixed header height - input area auto-sizes */
         header { flex-shrink: 0; height: var(--header-height, 60px); min-height: var(--header-height, 60px); }
-        .p-2.sm\:p-4.border-t { flex-shrink: 0; height: var(--input-height, 70px); min-height: var(--input-height, 70px); }
+        .p-2.sm\:p-4.border-t { flex-shrink: 0; min-height: 60px; }
 
         .chat-container { flex: 1; min-height: 0; overflow-y: auto; }
         .markdown-body pre { background: #1e1e1e; padding: 1rem; border-radius: 0.5rem; margin: 0.5rem 0; overflow-x: auto; }
@@ -184,12 +184,10 @@ HTML_TEMPLATE = """
             }
             /* Chat container: scrollable middle area */
             .chat-container { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-            /* Input area: fixed at bottom - MUST have explicit height */
+            /* Input area: fixed at bottom - auto height */
             .p-2.sm\:p-4.border-t { 
                 flex-shrink: 0; 
-                height: var(--input-height, 70px); 
-                min-height: var(--input-height, 70px);
-                overflow: hidden;
+                min-height: 60px;
             }
             /* OASIS: overlay mode on mobile */
             .oasis-divider { display: none !important; }
@@ -1249,15 +1247,14 @@ HTML_TEMPLATE = """
             const keyboardOpen = keyboardHeight > 100;
             
             if (isPWA || keyboardOpen) {
-                // PWA mode or keyboard open: adjust all heights
+                // PWA mode or keyboard open: adjust heights
                 const availableHeight = vh;
                 
-                // Update CSS variable
+                // Update CSS variable for app height
                 document.documentElement.style.setProperty('--app-height', availableHeight + 'px');
                 
-                // Ensure header and input keep their heights
+                // Ensure header keeps its height
                 const headerHeight = 60;
-                const inputHeight = 70;
                 
                 if (header) {
                     header.style.height = headerHeight + 'px';
@@ -1265,10 +1262,10 @@ HTML_TEMPLATE = """
                     header.style.flexShrink = '0';
                 }
                 
+                // Input area: only set flex-shrink, let it auto-size
                 if (inputArea) {
-                    inputArea.style.height = inputHeight + 'px';
-                    inputArea.style.minHeight = inputHeight + 'px';
                     inputArea.style.flexShrink = '0';
+                    // Don't set fixed height - let it auto-size based on content
                 }
                 
                 // Chat main takes full available height
@@ -1277,12 +1274,10 @@ HTML_TEMPLATE = """
                     chatMain.style.maxHeight = availableHeight + 'px';
                 }
                 
-                // Chat container gets remaining space
+                // Chat container gets remaining space via flex
                 if (chatContainer) {
-                    const containerHeight = availableHeight - headerHeight - inputHeight;
-                    chatContainer.style.height = Math.max(containerHeight, 100) + 'px';
-                    chatContainer.style.minHeight = '0';
                     chatContainer.style.flex = '1';
+                    chatContainer.style.minHeight = '0';
                 }
             } else {
                 // Normal mode: reset to CSS defaults
@@ -1294,8 +1289,7 @@ HTML_TEMPLATE = """
                 }
                 
                 if (inputArea) {
-                    inputArea.style.height = '';
-                    inputArea.style.minHeight = '';
+                    inputArea.style.flexShrink = '';
                 }
                 
                 if (chatMain) {
@@ -1304,7 +1298,7 @@ HTML_TEMPLATE = """
                 }
                 
                 if (chatContainer) {
-                    chatContainer.style.height = '';
+                    chatContainer.style.flex = '';
                     chatContainer.style.minHeight = '';
                 }
             }
