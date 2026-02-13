@@ -13,6 +13,9 @@ import os
 import signal
 import atexit
 import time
+import stat
+import platform
+import urllib.request
 import webbrowser
 from dotenv import load_dotenv
 
@@ -33,13 +36,73 @@ PORT_SCHEDULER = os.getenv("PORT_SCHEDULER", "51201")
 PORT_AGENT = os.getenv("PORT_AGENT", "51200")
 PORT_FRONTEND = os.getenv("PORT_FRONTEND", "51209")
 PORT_OASIS = os.getenv("PORT_OASIS", "51202")
+PORT_BARK = os.getenv("PORT_BARK", "58010")
 
 # 使用当前 Python 解释器（虚拟环境已由 run.sh/run.bat 激活）
 venv_python = sys.executable
 
+# Bark Server binary path
+BARK_SERVER_PATH = os.path.join(PROJECT_ROOT, "bin", "bark-server")
+
 # 子进程列表
 procs = []
 cleanup_done = False
+
+
+def detect_bark_platform():
+    """Detect platform for Bark Server binary download."""
+    os_name = platform.system().lower()  # linux / darwin
+    machine = platform.machine().lower()  # x86_64 / aarch64 / arm64
+
+    if os_name not in ("linux", "darwin"):
+        return None, None
+
+    if machine in ("x86_64", "amd64"):
+        arch = "amd64"
+    elif machine in ("aarch64", "arm64"):
+        arch = "arm64"
+    else:
+        return None, None
+
+    return os_name, arch
+
+
+def download_bark_server():
+    """Download bark-server binary to bin/ directory."""
+    os_name, arch = detect_bark_platform()
+    if not os_name:
+        print("⚠️  当前平台不支持自动下载 Bark Server，请手动安装")
+        return False
+
+    # Bark Server GitHub release URL
+    url = f"https://github.com/nicennnnnnnlee/bark-server/releases/latest/download/bark-server_{os_name}_{arch}"
+
+    print(f"📥 正在下载 Bark Server ({os_name}/{arch})...")
+    print(f"   来源: {url}")
+
+    bin_dir = os.path.join(PROJECT_ROOT, "bin")
+    os.makedirs(bin_dir, exist_ok=True)
+
+    try:
+        urllib.request.urlretrieve(url, BARK_SERVER_PATH)
+        os.chmod(
+            BARK_SERVER_PATH,
+            os.stat(BARK_SERVER_PATH).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH,
+        )
+        print("✅ Bark Server 下载完成")
+        return True
+    except Exception as e:
+        print(f"⚠️  Bark Server 下载失败: {e}")
+        return False
+
+
+def ensure_bark_server():
+    """Ensure bark-server binary is available, download if needed."""
+    if os.path.isfile(BARK_SERVER_PATH) and os.access(BARK_SERVER_PATH, os.X_OK):
+        print(f"✅ 已找到 Bark Server: {BARK_SERVER_PATH}")
+        return True
+    print("⚠️  未找到 Bark Server，开始自动下载...")
+    return download_bark_server()
 
 
 def cleanup():
@@ -109,6 +172,24 @@ if sys.platform == "win32":
 
 print("🚀 启动 Mini TimeBot...")
 print()
+
+# --- Start Bark Server as a background process ---
+bark_available = ensure_bark_server()
+if bark_available:
+    print(f"📱 [0/4] 启动 Bark 推送服务 (port {PORT_BARK})...")
+    bark_data_dir = os.path.join(PROJECT_ROOT, "data", "bark")
+    os.makedirs(bark_data_dir, exist_ok=True)
+    bark_proc = subprocess.Popen(
+        [BARK_SERVER_PATH, "-addr", f"127.0.0.1:{PORT_BARK}", "-data", bark_data_dir],
+        cwd=PROJECT_ROOT,
+        stdout=None,
+        stderr=None,
+    )
+    procs.append(bark_proc)
+    time.sleep(1)
+    print(f"   ✅ Bark Server 已启动 (PID: {bark_proc.pid})")
+else:
+    print("⚠️  跳过 Bark Server 启动（二进制不可用），推送功能不可用")
 
 # 服务配置：(提示信息, 脚本路径, 启动后等待秒数)
 services = [

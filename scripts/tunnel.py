@@ -29,6 +29,7 @@ BIN_DIR = os.path.join(PROJECT_ROOT, "bin")
 os.makedirs(BIN_DIR, exist_ok=True)
 
 CLOUDFLARED_PATH = os.path.join(BIN_DIR, "cloudflared")
+ENV_PATH = os.path.join(PROJECT_ROOT, "config", ".env")
 
 # ── 加载配置 ──────────────────────────────────────────────
 load_dotenv(dotenv_path=os.path.join(PROJECT_ROOT, "config", ".env"))
@@ -130,6 +131,52 @@ def cleanup(signum=None, frame=None):
         sys.exit(0)
 
 
+def write_domain_to_env(domain: str):
+    """Write/update PUBLIC_DOMAIN and BARK_PUBLIC_URL in config/.env"""
+    env_file = ENV_PATH
+
+    # Read existing content
+    if os.path.exists(env_file):
+        with open(env_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    else:
+        lines = []
+
+    # Update or append PUBLIC_DOMAIN and BARK_PUBLIC_URL
+    keys_to_write = {
+        "PUBLIC_DOMAIN": domain,
+        "BARK_PUBLIC_URL": domain,
+    }
+    keys_found = set()
+
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        replaced = False
+        for key, value in keys_to_write.items():
+            if stripped.startswith(f"{key}=") or stripped.startswith(f"# {key}="):
+                new_lines.append(f"{key}={value}\n")
+                keys_found.add(key)
+                replaced = True
+                break
+        if not replaced:
+            new_lines.append(line)
+
+    # Append any keys that weren't found
+    missing_keys = set(keys_to_write.keys()) - keys_found
+    if missing_keys:
+        if new_lines and not new_lines[-1].endswith("\n"):
+            new_lines.append("\n")
+        new_lines.append("\n# Cloudflare Tunnel public domain (auto-generated)\n")
+        for key in sorted(missing_keys):
+            new_lines.append(f"{key}={keys_to_write[key]}\n")
+
+    with open(env_file, "w", encoding="utf-8") as f:
+        f.writelines(new_lines)
+
+    print(f"📝 已将公网域名写入 {env_file}")
+
+
 def start_tunnel():
     """启动 Cloudflare Tunnel 并解析公网地址"""
     global tunnel_proc
@@ -160,6 +207,10 @@ def start_tunnel():
                 match = url_pattern.search(line)
                 if match:
                     public_url = match.group(1)
+
+                    # Write domain to .env for other services to read
+                    write_domain_to_env(public_url)
+
                     print()
                     print("============================================")
                     print("  🎉 公网部署成功！")

@@ -24,6 +24,8 @@ USER_INJECTED_TOOLS = {
     "run_command", "run_python_code",
     # Alarm management tools
     "add_alarm", "list_alarms", "delete_alarm",
+    # Bark push notification tools
+    "set_push_key", "send_push_notification", "get_push_status",
 }
 
 
@@ -170,6 +172,11 @@ class MiniTimeAgent:
                 "args": [os.path.join(self._src_dir, "mcp_oasis.py")],
                 "transport": "stdio",
             },
+            "bark_service": {
+                "command": "python",
+                "args": [os.path.join(self._src_dir, "mcp_bark.py")],
+                "transport": "stdio",
+            },
         })
 
         # 3. Fetch tool definitions (new API: no context manager needed)
@@ -243,6 +250,12 @@ class MiniTimeAgent:
             "5. OASIS 论坛：当用户的问题需要多角度深入分析时（如策略评估、利弊分析、争议话题等），\n"
             "   可以使用 post_to_oasis 工具发起多专家讨论，由创意、批判、数据、综合四位专家并行辩论后给出结论。\n"
             "   使用 check_oasis_discussion 可查看讨论进展，list_oasis_topics 可查看历史讨论。\n"
+            "6. 推送通知：可以向用户的手机发送推送通知（通过 Bark）。\n"
+            "   - set_push_key：保存用户的 Bark Key（用户首次配置推送时使用）\n"
+            "   - send_push_notification：发送推送通知到用户手机\n"
+            "   - get_push_status：查看推送配置状态\n"
+            "   调用推送工具时，username 参数由系统自动注入，你不需要也不应该提供该参数。\n"
+            "   当定时任务触发时，如果用户已配置 Bark Key，可以主动发送推送通知提醒用户。\n"
             "   - run_command：执行 shell 命令（ls、grep、cat、curl 等白名单内的命令）\n"
             "   - run_python_code：执行 Python 代码片段（数据计算、文本处理等）\n"
             "   - list_allowed_commands：查看允许执行的命令白名单\n"

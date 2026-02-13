@@ -29,7 +29,16 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <title>Xavier AnyControl | AI Agent</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+
+    <!-- PWA / iOS Full-screen support -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="AnyControl">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#111827">
+    <link rel="apple-touch-icon" href="https://img.icons8.com/fluency/180/robot-2.png">
+    <link rel="manifest" href="/manifest.json">
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.2/marked.min.js"></script>
@@ -947,6 +956,34 @@ HTML_TEMPLATE = """
 @app.route("/")
 def index():
     return render_template_string(HTML_TEMPLATE)
+
+@app.route("/manifest.json")
+def manifest():
+    """Serve PWA manifest for iOS/Android Add-to-Home-Screen support."""
+    manifest_data = {
+        "name": "Xavier AnyControl",
+        "short_name": "AnyControl",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#111827",
+        "theme_color": "#111827",
+        "icons": [
+            {
+                "src": "https://img.icons8.com/fluency/192/robot-2.png",
+                "sizes": "192x192",
+                "type": "image/png"
+            },
+            {
+                "src": "https://img.icons8.com/fluency/512/robot-2.png",
+                "sizes": "512x512",
+                "type": "image/png"
+            }
+        ]
+    }
+    return app.response_class(
+        response=__import__("json").dumps(manifest_data),
+        mimetype="application/manifest+json"
+    )
 
 @app.route("/proxy_login", methods=["POST"])
 def proxy_login():
