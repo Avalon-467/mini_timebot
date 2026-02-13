@@ -112,6 +112,7 @@ class MiniTimeAgent:
         self._agent_app = None
         self._mcp_client: Optional[MultiServerMCPClient] = None
         self._memory = None
+        self._memory_ctx = None
 
         # Per-user state
         self._active_tasks: dict[str, asyncio.Task] = {}
@@ -135,8 +136,8 @@ class MiniTimeAgent:
     async def startup(self):
         """Initialize MCP client, load tools, build LangGraph workflow."""
         # 1. Open checkpoint DB
-        self._memory = AsyncSqliteSaver.from_conn_string(self._db_path)
-        await self._memory.__aenter__()
+        self._memory_ctx = AsyncSqliteSaver.from_conn_string(self._db_path)
+        self._memory = await self._memory_ctx.__aenter__()
 
         # 2. Start MCP servers
         self._mcp_client = MultiServerMCPClient({
@@ -161,9 +162,8 @@ class MiniTimeAgent:
                 "transport": "stdio",
             },
         })
-        await self._mcp_client.__aenter__()
 
-        # 3. Fetch tool definitions
+        # 3. Fetch tool definitions (new API: no context manager needed)
         self._mcp_tools = await self._mcp_client.get_tools()
 
         # 4. Build LangGraph workflow
@@ -179,14 +179,9 @@ class MiniTimeAgent:
 
     async def shutdown(self):
         """Clean up MCP client and checkpoint DB."""
-        if self._mcp_client:
+        if self._memory_ctx:
             try:
-                await self._mcp_client.__aexit__(None, None, None)
-            except Exception:
-                pass
-        if self._memory:
-            try:
-                await self._memory.__aexit__(None, None, None)
+                await self._memory_ctx.__aexit__(None, None, None)
             except Exception:
                 pass
 
