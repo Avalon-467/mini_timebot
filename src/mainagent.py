@@ -76,6 +76,7 @@ class UserRequest(BaseModel):
 class SystemTriggerRequest(BaseModel):
     user_id: str
     text: str = "summary"
+    session_id: str = "default"
 
 class CancelRequest(BaseModel):
     user_id: str
@@ -111,6 +112,7 @@ async def ask_agent(req: UserRequest):
         "trigger_source": "user",
         "enabled_tools": req.enabled_tools,
         "user_id": req.user_id,
+        "session_id": req.session_id,
     }
 
     result = await agent.agent_app.ainvoke(user_input, config)
@@ -134,6 +136,7 @@ async def ask_agent_stream(req: UserRequest):
         "trigger_source": "user",
         "enabled_tools": req.enabled_tools,
         "user_id": req.user_id,
+        "session_id": req.session_id,
     }
 
     queue: asyncio.Queue[str | None] = asyncio.Queue()
@@ -222,15 +225,18 @@ async def cancel_agent(req: CancelRequest):
 
 @app.post("/system_trigger")
 async def system_trigger(req: SystemTriggerRequest):
-    # System triggers use a dedicated session to avoid mixing with user conversations
-    thread_id = f"{req.user_id}#__system__"
+    thread_id = f"{req.user_id}#{req.session_id}"
     config = {"configurable": {"thread_id": thread_id}}
     system_input = {
-        "messages": [HumanMessage(content=f"执行指令: {req.text}")],
+        "messages": [HumanMessage(content=req.text)],
         "trigger_source": "system",
+        "enabled_tools": None,
+        "user_id": req.user_id,
+        "session_id": req.session_id,
     }
+    # fire-and-forget：立刻返回，graph 在后台异步执行
     asyncio.create_task(agent.agent_app.ainvoke(system_input, config))
-    return {"status": "received", "message": f"已经为用户 {req.user_id} 启动外部定时任务"}
+    return {"status": "received", "message": f"系统触发已收到，用户 {req.user_id}"}
 
 
 if __name__ == "__main__":

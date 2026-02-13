@@ -36,6 +36,7 @@ class AgentState(TypedDict):
     trigger_source: str
     enabled_tools: Optional[list[str]]
     user_id: Optional[str]
+    session_id: Optional[str]
 
 
 class UserAwareToolNode:
@@ -75,6 +76,9 @@ class UserAwareToolNode:
             else:
                 if tc["name"] in USER_INJECTED_TOOLS:
                     tc["args"]["username"] = user_id
+                # 给 add_alarm 额外注入 session_id，让闹钟记住设置时的会话
+                if tc["name"] == "add_alarm":
+                    tc["args"]["session_id"] = state.get("session_id") or "default"
                 allowed_calls.append(tc)
                 print(f">>> [tools] ✅ 调用工具: {tc['name']}")
 
@@ -311,24 +315,19 @@ class MiniTimeAgent:
 
         history_messages = list(state["messages"])
 
-        # System trigger (external scheduler) — special logic
-        if state.get("trigger_source") == "system":
-            # 根据触发内容决定处理方式
-            user_text = history_messages[-1].content if history_messages else ""
-            if "执行指令: summary" in user_text.lower():
-                # summary 任务：总结用户对话
-                summary_prompt = "【系统指令】：请对该用户之前的对话进行核心诉求总结，供管理员参考。"
-                input_messages = [SystemMessage(content=base_prompt), SystemMessage(content=summary_prompt)] + history_messages[:-1]
-            else:
-                # 普通闹钟触发：响应用户的指令
-                input_messages = [SystemMessage(content=base_prompt)] + history_messages
-            
-            response = await llm.ainvoke(input_messages)
-            print(f"\n>>> [外部定时任务执行] 用户 {state.get('user_id', 'Unknown')}:")
-            print(f">>> {response.content}")
-            return {"messages": [response]}
+        # 如果是系统触发，且最后一条是 HumanMessage（首轮），给它加上系统触发说明
+        is_system = state.get("trigger_source") == "system"
+        if is_system and history_messages and isinstance(history_messages[-1], HumanMessage):
+            original_text = history_messages[-1].content
+            system_trigger_prompt = (
+                "[系统触发] 当前请求来自定时任务调度器，而非用户实时对话。\n"
+                "请根据触发内容执行相应操作（如发送推送通知提醒用户、执行预设指令等）。\n"
+                "你可以正常使用所有已启用的工具。\n"
+                f"---\n{original_text}"
+            )
+            history_messages = history_messages[:-1] + [HumanMessage(content=system_trigger_prompt)]
 
-        # Normal user conversation
+        # 正常对话流程（用户和系统触发共用）
         if tool_status_prompt and len(history_messages) >= 1:
             last_msg = history_messages[-1]
             augmented_content = f"[系统通知] {tool_status_prompt}\n\n---\n{last_msg.content}"
@@ -347,6 +346,31 @@ class MiniTimeAgent:
     # ------------------------------------------------------------------
     # Public interface: tools info
     # ------------------------------------------------------------------
+    @staticmethod
+    def _sanitize_messages(messages: list) -> list:
+        """
+        清理消息列表，确保每条带 tool_calls 的 AI 消息后面都有对应的 ToolMessage。
+        如果末尾有不完整的 tool_calls 序列，直接截断丢弃。
+        """
+        # 收集所有已存在的 tool_call_id 回复
+        answered_ids = set()
+        for msg in messages:
+            if isinstance(msg, ToolMessage) and hasattr(msg, "tool_call_id"):
+                answered_ids.add(msg.tool_call_id)
+
+        # 从后往前找到第一个"完整"的位置
+        clean = list(messages)
+        while clean:
+            last = clean[-1]
+            # 如果最后一条是带 tool_calls 的 AI 消息，检查是否全部有回复
+            if isinstance(last, AIMessage) and hasattr(last, "tool_calls") and last.tool_calls:
+                pending_ids = {tc["id"] for tc in last.tool_calls}
+                if not pending_ids.issubset(answered_ids):
+                    clean.pop()
+                    continue
+            break
+        return clean
+
     def get_tools_info(self) -> list[dict]:
         """Return serializable tool metadata list."""
         return [{"name": t.name, "description": t.description or ""} for t in self._mcp_tools]

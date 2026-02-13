@@ -15,16 +15,17 @@ PORT_SCHEDULER = int(os.getenv("PORT_SCHEDULER", "51201"))
 SCHEDULER_URL = f"http://127.0.0.1:{PORT_SCHEDULER}/tasks"
 
 @mcp.tool()
-async def add_alarm(username: str, cron: str, text: str) -> str:
+async def add_alarm(username: str, cron: str, text: str, session_id: str = "default") -> str:
     """
     为用户设置一个定时任务（闹钟）。
     :param username: 用户唯一标识符（系统自动注入，无需手动传递）
     :param cron: Cron 表达式 (分 时 日 月 周)，例如 "0 1 * * *" 代表凌晨1点
     :param text: 到点时需要执行的指令内容
+    :param session_id: 会话ID（系统自动注入，无需手动传递）
     """
     async with httpx.AsyncClient() as client:
         try:
-            payload = {"user_id": username, "cron": cron, "text": text}
+            payload = {"user_id": username, "cron": cron, "text": text, "session_id": session_id}
             resp = await client.post(SCHEDULER_URL, json=payload, timeout=10.0)
             if resp.status_code == 200:
                 data = resp.json()

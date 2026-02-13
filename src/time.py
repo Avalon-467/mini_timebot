@@ -44,6 +44,7 @@ class CronTask(BaseModel):
     user_id: str
     cron: str  # 格式: "分 时 日 月 周"
     text: str
+    session_id: str = "default"
 
 class TaskResponse(BaseModel):
     task_id: str
@@ -53,16 +54,25 @@ class TaskResponse(BaseModel):
     next_run: Optional[str]
 
 # --- 全局调度器 ---
-scheduler = AsyncIOScheduler()
+# misfire_grace_time: 错过触发后，在该秒数内仍会补触发（None=永远补触发）
+# coalesce: 多次错过合并为一次执行
+scheduler = AsyncIOScheduler(job_defaults={
+    "misfire_grace_time": 3600,  # 错过1小时内仍补触发
+    "coalesce": True,
+})
 PORT_AGENT = int(os.getenv("PORT_AGENT", "51200"))
 AGENT_URL = f"http://127.0.0.1:{PORT_AGENT}/system_trigger"
 
-async def trigger_agent(user_id: str, text: str):
+async def trigger_agent(user_id: str, text: str, session_id: str = "default"):
     """到达定时时间，向 Agent 发送 HTTP 请求"""
     async with httpx.AsyncClient() as client:
         try:
-            resp = await client.post(AGENT_URL, json={"user_id": user_id, "text": text}, timeout=10.0)
-            print(f"[{datetime.now()}] 任务触发：用户={user_id}, 状态码={resp.status_code}")
+            resp = await client.post(AGENT_URL, json={
+                "user_id": user_id,
+                "text": text,
+                "session_id": session_id,
+            }, timeout=10.0)
+            print(f"[{datetime.now()}] 任务触发：用户={user_id}, session={session_id}, 状态码={resp.status_code}")
         except Exception as e:
             print(f"[{datetime.now()}] 任务触发失败: {e}")
 
@@ -81,12 +91,12 @@ def restore_tasks():
                 trigger_agent,
                 'cron',
                 minute=c[0], hour=c[1], day=c[2], month=c[3], day_of_week=c[4],
-                args=[info["user_id"], info["text"]],
+                args=[info["user_id"], info["text"], info.get("session_id", "default")],
                 id=task_id,
                 replace_existing=True
             )
             restored += 1
-            print(f"   - [ID: {task_id}] 用户: {info['user_id']}, cron: {info['cron']}, 内容: {info['text']}")
+            print(f"   - [ID: {task_id}] 用户: {info['user_id']}, cron: {info['cron']}, session: {info.get('session_id', 'default')}, 内容: {info['text']}")
         except Exception as e:
             print(f"   ⚠️ 恢复任务 {task_id} 失败: {e}")
     
@@ -113,7 +123,7 @@ async def add_task(task: CronTask):
             trigger_agent,
             'cron',
             minute=c[0], hour=c[1], day=c[2], month=c[3], day_of_week=c[4],
-            args=[task.user_id, task.text],
+            args=[task.user_id, task.text, task.session_id],
             id=task_id,
             replace_existing=True
         )
@@ -123,6 +133,7 @@ async def add_task(task: CronTask):
             "user_id": task.user_id,
             "cron": task.cron,
             "text": task.text,
+            "session_id": task.session_id,
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         save_tasks(tasks)
