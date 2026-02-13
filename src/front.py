@@ -156,7 +156,7 @@ HTML_TEMPLATE = """
         /* === Mobile responsive === */
         @media (max-width: 768px) {
             .main-layout { flex-direction: column; }
-            .chat-main { max-width: 100%; width: 100%; height: 100vh; }
+            .chat-main { max-width: 100%; width: 100%; height: 100dvh; }
             .chat-container { height: auto !important; flex: 1; min-height: 0; }
             /* OASIS: overlay mode on mobile */
             .oasis-divider { display: none !important; }
@@ -178,6 +178,11 @@ HTML_TEMPLATE = """
             /* Reduce padding on mobile */
             #chat-box { padding: 12px !important; }
             .message-agent, .message-user { max-width: 92% !important; }
+            /* Increase font size on mobile */
+            .message-content, .message-agent, .message-user { font-size: 16px !important; }
+            .message-content p, .message-content li { font-size: 16px !important; }
+            #message-input, #message-input::placeholder { font-size: 16px !important; }
+            .tool-tag { font-size: 14px !important; padding: 6px 12px !important; }
         }
         /* Hide mobile-only elements on desktop */
         @media (min-width: 769px) {
