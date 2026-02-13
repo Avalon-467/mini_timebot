@@ -53,6 +53,9 @@ Source: "..\src\*"; DestDir: "{app}\src"; Flags: ignoreversion recursesubdirs
 ; 工具
 Source: "..\tools\*"; DestDir: "{app}\tools"; Flags: ignoreversion recursesubdirs
 
+; OASIS 论坛模块
+Source: "..\oasis\*"; DestDir: "{app}\oasis"; Flags: ignoreversion recursesubdirs
+
 ; 配置模板
 Source: "..\config\requirements.txt"; DestDir: "{app}\config"; Flags: ignoreversion
 Source: "..\config\.env.example"; DestDir: "{app}\config"; Flags: ignoreversion

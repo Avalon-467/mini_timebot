@@ -4,13 +4,13 @@
 
 ## 架构概览
 
-项目由 4 个协作服务组成：
+项目由 5 个协作服务组成：
 
 ```
-浏览器 (聊天 UI + 登录页)
+浏览器 (聊天 UI + 登录页 + OASIS 论坛面板)
     │  HTTP :51209
     ▼
-front.py (Flask + Session)     ── 前端代理，渲染登录/聊天页面，管理会话凭证
+front.py (Flask + Session)     ── 前端代理，渲染登录/聊天页面，管理会话凭证，代理 OASIS 请求
     │  HTTP :51200
     ▼
 mainagent.py (FastAPI + LangGraph)  ── 核心 AI Agent，集成 DeepSeek LLM + 对话记忆 + 密码认证
@@ -20,19 +20,25 @@ mainagent.py (FastAPI + LangGraph)  ── 核心 AI Agent，集成 DeepSeek LLM
     │       ▼
     ├── time.py (FastAPI + APScheduler)  ── 定时调度中心，管理 cron 任务
     ├── mcp_search.py (FastMCP)    ── MCP 搜索服务，提供联网搜索（DuckDuckGo）
-    └── mcp_filemanager.py (FastMCP) ── MCP 文件服务，提供用户文件管理
+    ├── mcp_filemanager.py (FastMCP) ── MCP 文件服务，提供用户文件管理
+    └── mcp_oasis.py (FastMCP)    ── MCP OASIS 服务，提供多专家讨论接口
+                                      │  HTTP :51202
+                                      ▼
+                                 oasis/server.py  ── OASIS 论坛服务，多专家并行讨论系统
 ```
 
 ### 服务说明
 
 | 服务 | 端口 | 说明 |
 |------|------|------|
-| `src/front.py` | 51209 | Flask Web UI，提供登录页 + 聊天界面，通过 Session 管理用户凭证 |
+| `src/front.py` | 51209 | Flask Web UI，提供登录页 + 聊天界面 + OASIS 论坛面板，通过 Session 管理用户凭证 |
 | `src/mainagent.py` | 51200 | 核心 AI Agent（LangGraph + DeepSeek），管理对话、工具调用与密码认证 |
 | `src/mcp_scheduler.py` | - | MCP 工具服务（Agent 子进程），提供 add_alarm / list_alarms / delete_alarm |
 | `src/mcp_search.py` | - | MCP 搜索服务（Agent 子进程），提供 web_search / web_news |
 | `src/mcp_filemanager.py` | - | MCP 文件服务（Agent 子进程），提供 list_files / read_file / write_file / append_file / delete_file |
+| `src/mcp_oasis.py` | - | MCP OASIS 服务（Agent 子进程），提供 post_to_oasis / check_oasis_discussion / list_oasis_topics |
 | `src/time.py` | 51201 | 定时任务调度中心（APScheduler），任务到期时回调 Agent |
+| `oasis/server.py` | 51202 | OASIS 论坛服务，独立 FastAPI 服务，管理多专家讨论 |
 | `test/chat.py` | - | 命令行测试客户端 |
 
 > **端口可配置**：在 `config/.env` 中设置 `PORT_SCHEDULER`、`PORT_AGENT`、`PORT_FRONTEND` 即可自定义端口，参考 `config/.env.example`。

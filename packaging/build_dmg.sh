@@ -140,6 +140,11 @@ if [ -d "${ROOT}/tools" ]; then
     cp -r "${ROOT}/tools" "${RESOURCES}/tools"
 fi
 
+# OASIS 论坛模块
+if [ -d "${ROOT}/oasis" ]; then
+    cp -r "${ROOT}/oasis" "${RESOURCES}/oasis"
+fi
+
 # 配置模板
 mkdir -p "${RESOURCES}/config"
 cp "${ROOT}/config/requirements.txt" "${RESOURCES}/config/"
