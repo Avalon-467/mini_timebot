@@ -155,7 +155,23 @@ HTML_TEMPLATE = """
         .oasis-discussion-box { height: calc(100vh - 340px); overflow-y: auto; }
         .oasis-conclusion-box { background: linear-gradient(135deg, #f0fdf4, #ecfdf5); border: 1px solid #86efac; border-radius: 12px; padding: 12px; }
         .main-layout { display: flex; height: 100vh; max-width: 100%; }
-        .chat-main { flex: 1; min-width: 0; max-width: 900px; }
+        .chat-main { flex: 1; min-width: 0; max-width: 900px; display: flex; }
+
+        /* === Mobile responsive === */
+        @media (max-width: 768px) {
+            .main-layout { flex-direction: column; }
+            .chat-main { max-width: 100%; width: 100%; height: 100vh; }
+            .chat-container { height: auto !important; flex: 1; min-height: 0; }
+            /* Hide OASIS on mobile by default */
+            .oasis-panel { display: none !important; }
+            .oasis-divider { display: none !important; }
+            /* Header: stack items vertically on narrow screens */
+            .mobile-header-top { flex-wrap: wrap; gap: 6px; }
+            .mobile-header-actions { flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+            /* Reduce padding on mobile */
+            #chat-box { padding: 12px !important; }
+            .message-agent, .message-user { max-width: 92% !important; }
+        }
         .oasis-divider { width: 1px; background: #e5e7eb; cursor: col-resize; flex-shrink: 0; }
         .oasis-divider:hover { background: #3b82f6; width: 3px; }
     </style>
@@ -173,8 +189,8 @@ HTML_TEMPLATE = """
     <div id="offline-banner">⚠️ 网络已断开，请检查连接</div>
 
     <!-- ========== 登录页 ========== -->
-    <div id="login-screen" class="min-h-screen flex items-center justify-center safe-top safe-bottom" style="width:100%;height:100%;overflow:auto;">
-        <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md border">
+    <div id="login-screen" class="min-h-screen flex items-center justify-center safe-top safe-bottom px-4" style="width:100%;height:100%;overflow:auto;">
+        <div class="bg-white rounded-2xl shadow-2xl p-6 sm:p-8 w-full max-w-md border">
             <div class="flex items-center justify-center space-x-3 mb-6">
                 <div class="bg-blue-600 p-3 rounded-xl text-white font-bold text-2xl">X</div>
                 <h1 class="text-2xl font-bold text-gray-800">Xavier AnyControl</h1>
@@ -201,24 +217,24 @@ HTML_TEMPLATE = """
     <div id="chat-screen" class="main-layout safe-top safe-bottom safe-left safe-right" style="display:none;">
 
         <!-- ===== 左侧：聊天区 ===== -->
-        <div class="chat-main h-screen flex-col bg-white border-x border-gray-200 shadow-2xl">
-            <header class="p-4 border-b bg-white flex justify-between items-center sticky top-0 z-10">
-                <div class="flex items-center space-x-3">
-                    <div class="bg-blue-600 p-2 rounded-lg text-white font-bold text-xl">X</div>
+        <div class="chat-main h-screen flex flex-col bg-white border-x border-gray-200 shadow-2xl">
+            <header class="p-3 sm:p-4 border-b bg-white flex justify-between items-start sm:items-center sticky top-0 z-10 gap-2">
+                <div class="flex items-center space-x-2 sm:space-x-3 mobile-header-top flex-shrink-0">
+                    <div class="bg-blue-600 p-1.5 sm:p-2 rounded-lg text-white font-bold text-lg sm:text-xl">X</div>
                     <div>
-                        <h1 class="text-lg font-bold text-gray-800 leading-tight">Xavier AnyControl</h1>
-                        <p class="text-xs text-green-500 flex items-center">● 链路已加密 (HTTPS)</p>
+                        <h1 class="text-sm sm:text-lg font-bold text-gray-800 leading-tight">AnyControl</h1>
+                        <p class="text-[10px] sm:text-xs text-green-500 flex items-center">● 已加密</p>
                     </div>
                 </div>
-                <div class="flex items-center space-x-2">
-                    <div id="uid-display" class="text-sm font-mono bg-gray-100 px-3 py-1 rounded border"></div>
-                    <div id="session-display" class="text-xs font-mono bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-200 cursor-default" title="当前对话号"></div>
-                    <button onclick="handleNewSession()" class="text-xs bg-green-50 text-green-600 hover:bg-green-100 px-2 py-1 rounded border border-green-200 transition-colors" title="开启新对话">+ 新对话</button>
-                    <button onclick="handleLogout()" class="text-xs text-gray-400 hover:text-red-500 px-2 py-1 rounded transition-colors" title="切换用户">退出</button>
+                <div class="flex items-center space-x-1 sm:space-x-2 mobile-header-actions flex-shrink-0">
+                    <div id="uid-display" class="text-xs sm:text-sm font-mono bg-gray-100 px-2 sm:px-3 py-1 rounded border truncate max-w-[80px] sm:max-w-none"></div>
+                    <div id="session-display" class="text-[10px] sm:text-xs font-mono bg-blue-50 text-blue-600 px-1.5 sm:px-2 py-1 rounded border border-blue-200 cursor-default" title="当前对话号"></div>
+                    <button onclick="handleNewSession()" class="text-[10px] sm:text-xs bg-green-50 text-green-600 hover:bg-green-100 px-1.5 sm:px-2 py-1 rounded border border-green-200 transition-colors" title="开启新对话">+新</button>
+                    <button onclick="handleLogout()" class="text-[10px] sm:text-xs text-gray-400 hover:text-red-500 px-1.5 sm:px-2 py-1 rounded transition-colors" title="切换用户">退出</button>
                 </div>
             </header>
 
-            <div id="chat-box" class="chat-container overflow-y-auto p-6 space-y-6 flex-grow bg-gray-50">
+            <div id="chat-box" class="chat-container overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6 flex-grow bg-gray-50">
                 <div class="flex justify-start">
                     <div class="message-agent bg-white border p-4 max-w-[85%] shadow-sm text-gray-700">
                         你好！我是 Xavier 智能助手。我已经准备好为你服务，请输入你的指令。
@@ -226,7 +242,7 @@ HTML_TEMPLATE = """
                 </div>
             </div>
 
-            <div class="p-4 border-t bg-white">
+            <div class="p-2 sm:p-4 border-t bg-white flex-shrink-0">
                 <!-- Tool List Panel -->
                 <div id="tool-panel-wrapper" class="mb-2" style="display:none;">
                     <div class="flex items-center justify-between mb-1">
@@ -242,23 +258,23 @@ HTML_TEMPLATE = """
                         </div>
                     </div>
                 </div>
-                <div class="flex items-end space-x-3">
+                <div class="flex items-end space-x-2 sm:space-x-3">
                     <div class="flex-grow">
                         <textarea id="user-input" rows="1" 
-                            class="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none transition-all"
-                            placeholder="输入指令，Shift + Enter 换行..."></textarea>
+                            class="w-full p-2 sm:p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none transition-all text-sm sm:text-base"
+                            placeholder="输入指令..."></textarea>
                     </div>
                     <button onclick="handleSend()" id="send-btn"
-                        class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl transition-all font-bold shadow-lg h-[50px]">
+                        class="bg-blue-600 hover:bg-blue-700 text-white px-4 sm:px-6 py-2 sm:py-3 rounded-xl transition-all font-bold shadow-lg h-[42px] sm:h-[50px] text-sm sm:text-base flex-shrink-0">
                         发送
                     </button>
                     <button onclick="handleCancel()" id="cancel-btn"
-                        class="bg-red-500 hover:bg-red-600 text-white px-6 py-3 rounded-xl transition-all font-bold shadow-lg h-[50px]"
+                        class="bg-red-500 hover:bg-red-600 text-white px-4 sm:px-6 py-2 sm:py-3 rounded-xl transition-all font-bold shadow-lg h-[42px] sm:h-[50px] text-sm sm:text-base flex-shrink-0"
                         style="display:none;">
                         终止
                     </button>
                 </div>
-                <p class="text-[10px] text-center text-gray-400 mt-3 font-mono">Secured by Nginx Reverse Proxy & SSH Tunnel</p>
+                <p class="text-[10px] text-center text-gray-400 mt-2 sm:mt-3 font-mono hidden sm:block">Secured by Nginx Reverse Proxy & SSH Tunnel</p>
             </div>
         </div>
 
