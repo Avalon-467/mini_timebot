@@ -22,6 +22,8 @@ USER_INJECTED_TOOLS = {
     "list_files", "read_file", "write_file", "append_file", "delete_file",
     # Command execution tools
     "run_command", "run_python_code",
+    # Alarm management tools
+    "add_alarm", "list_alarms", "delete_alarm",
 }
 
 
