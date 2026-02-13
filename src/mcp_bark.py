@@ -45,10 +45,12 @@ def _read_bark_key(username: str) -> str | None:
 
 
 def _get_public_url() -> str | None:
-    """Read the public domain URL from .env (written by tunnel.py)."""
+    """Read the frontend public URL from .env for click-through redirect.
+    This should be the frontend tunnel URL (PUBLIC_DOMAIN), not the Bark server URL.
+    """
     # Re-read .env each time to pick up dynamic updates
     load_dotenv(dotenv_path=os.path.join(root_dir, "config", ".env"), override=True)
-    return os.getenv("BARK_PUBLIC_URL") or os.getenv("PUBLIC_DOMAIN")
+    return os.getenv("PUBLIC_DOMAIN")
 
 
 @mcp.tool()
