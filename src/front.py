@@ -37,7 +37,15 @@ HTML_TEMPLATE = """
     <meta name="apple-mobile-web-app-title" content="AnyControl">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="theme-color" content="#111827">
+    <meta name="format-detection" content="telephone=no">
+    <meta name="msapplication-tap-highlight" content="no">
+    <meta name="msapplication-TileColor" content="#111827">
     <link rel="apple-touch-icon" href="https://img.icons8.com/fluency/180/robot-2.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="https://img.icons8.com/fluency/152/robot-2.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="https://img.icons8.com/fluency/180/robot-2.png">
+    <link rel="apple-touch-icon" sizes="167x167" href="https://img.icons8.com/fluency/167/robot-2.png">
+    <!-- iOS splash screens -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="manifest" href="/manifest.json">
     
     <script src="https://cdn.tailwindcss.com"></script>
@@ -46,6 +54,57 @@ HTML_TEMPLATE = """
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
 
     <style>
+        /* === Native App Behavior (mobile only) === */
+        html, body {
+            overscroll-behavior: none;
+        }
+        @media (hover: none) and (pointer: coarse) {
+            /* Mobile / touch devices only */
+            html, body {
+                -webkit-overflow-scrolling: touch;
+                -webkit-user-select: none;
+                user-select: none;
+                -webkit-touch-callout: none;
+                -webkit-tap-highlight-color: transparent;
+                touch-action: manipulation;
+                position: fixed;
+                width: 100%;
+                height: 100%;
+                overflow: hidden;
+            }
+            /* Allow text selection only inside chat messages on mobile */
+            .message-agent, .message-user, .markdown-body {
+                -webkit-user-select: text;
+                user-select: text;
+            }
+        }
+        /* Safe area insets for notched devices */
+        .safe-top { padding-top: env(safe-area-inset-top); }
+        .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+        .safe-left { padding-left: env(safe-area-inset-left); }
+        .safe-right { padding-right: env(safe-area-inset-right); }
+        /* Splash screen */
+        #app-splash {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(135deg, #111827 0%, #1e3a5f 100%);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 99999; transition: opacity 0.5s ease;
+        }
+        #app-splash.fade-out { opacity: 0; pointer-events: none; }
+        #app-splash .splash-icon { width: 80px; height: 80px; border-radius: 20px; margin-bottom: 16px; animation: splash-bounce 1s ease infinite; }
+        #app-splash .splash-title { color: white; font-size: 22px; font-weight: 700; letter-spacing: 1px; }
+        #app-splash .splash-sub { color: rgba(255,255,255,0.5); font-size: 12px; margin-top: 8px; }
+        @keyframes splash-bounce { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+        /* Offline banner */
+        #offline-banner {
+            display: none; position: fixed; top: 0; left: 0; right: 0;
+            background: #ef4444; color: white; text-align: center;
+            padding: 6px 0; font-size: 13px; font-weight: 600; z-index: 99998;
+            padding-top: calc(6px + env(safe-area-inset-top));
+        }
+        #offline-banner.show { display: block; animation: slideDown 0.3s ease; }
+        @keyframes slideDown { from { transform: translateY(-100%); } to { transform: translateY(0); } }
+
         .chat-container { height: calc(100vh - 180px); }
         .markdown-body pre { background: #1e1e1e; padding: 1rem; border-radius: 0.5rem; margin: 0.5rem 0; overflow-x: auto; }
         .markdown-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.9em; }
@@ -103,8 +162,18 @@ HTML_TEMPLATE = """
 </head>
 <body class="bg-gray-100 font-sans leading-normal tracking-normal">
 
+    <!-- Splash Screen -->
+    <div id="app-splash">
+        <img class="splash-icon" src="https://img.icons8.com/fluency/180/robot-2.png" alt="">
+        <div class="splash-title">AnyControl</div>
+        <div class="splash-sub">Xavier AI Agent</div>
+    </div>
+
+    <!-- Offline Banner -->
+    <div id="offline-banner">⚠️ 网络已断开，请检查连接</div>
+
     <!-- ========== 登录页 ========== -->
-    <div id="login-screen" class="min-h-screen flex items-center justify-center">
+    <div id="login-screen" class="min-h-screen flex items-center justify-center safe-top safe-bottom" style="width:100%;height:100%;overflow:auto;">
         <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md border">
             <div class="flex items-center justify-center space-x-3 mb-6">
                 <div class="bg-blue-600 p-3 rounded-xl text-white font-bold text-2xl">X</div>
@@ -129,7 +198,7 @@ HTML_TEMPLATE = """
     </div>
 
     <!-- ========== 主布局（聊天 + OASIS）（初始隐藏） ========== -->
-    <div id="chat-screen" class="main-layout" style="display:none;">
+    <div id="chat-screen" class="main-layout safe-top safe-bottom safe-left safe-right" style="display:none;">
 
         <!-- ===== 左侧：聊天区 ===== -->
         <div class="chat-main h-screen flex-col bg-white border-x border-gray-200 shadow-2xl">
@@ -949,6 +1018,105 @@ HTML_TEMPLATE = """
             }
         }, 10000); // Every 10 seconds
     </script>
+
+    <script>
+    // === Native App Enhancements ===
+
+    // 1. Splash screen dismiss
+    window.addEventListener('load', () => {
+        setTimeout(() => {
+            const splash = document.getElementById('app-splash');
+            if (splash) {
+                splash.classList.add('fade-out');
+                setTimeout(() => splash.remove(), 600);
+            }
+        }, 800);
+    });
+
+    // 2. Prevent pull-to-refresh and overscroll bounce
+    document.addEventListener('touchmove', function(e) {
+        // Allow scrolling inside scrollable containers
+        let el = e.target;
+        while (el && el !== document.body) {
+            const style = window.getComputedStyle(el);
+            if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && el.scrollHeight > el.clientHeight) {
+                return; // Allow scroll inside this element
+            }
+            el = el.parentElement;
+        }
+        e.preventDefault();
+    }, { passive: false });
+
+    // 3. Prevent double-tap zoom
+    let lastTouchEnd = 0;
+    document.addEventListener('touchend', function(e) {
+        const now = Date.now();
+        if (now - lastTouchEnd <= 300) {
+            e.preventDefault();
+        }
+        lastTouchEnd = now;
+    }, false);
+
+    // 4. Prevent pinch zoom
+    document.addEventListener('gesturestart', function(e) {
+        e.preventDefault();
+    });
+    document.addEventListener('gesturechange', function(e) {
+        e.preventDefault();
+    });
+
+    // 5. Prevent context menu on long press - mobile only (except in chat messages)
+    const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    if (isTouchDevice) {
+        document.addEventListener('contextmenu', function(e) {
+            const allowed = e.target.closest('.message-agent, .message-user, .markdown-body, textarea, input');
+            if (!allowed) {
+                e.preventDefault();
+            }
+        });
+    }
+
+    // 6. Online/Offline detection
+    function updateOnlineStatus() {
+        const banner = document.getElementById('offline-banner');
+        if (navigator.onLine) {
+            banner.classList.remove('show');
+        } else {
+            banner.classList.add('show');
+        }
+    }
+    window.addEventListener('online', updateOnlineStatus);
+    window.addEventListener('offline', updateOnlineStatus);
+
+    // 7. Register Service Worker for PWA caching
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+
+    // 8. iOS standalone: handle navigation to stay in-app
+    if (window.navigator.standalone) {
+        document.addEventListener('click', function(e) {
+            const a = e.target.closest('a');
+            if (a && a.href && !a.target && a.hostname === location.hostname) {
+                e.preventDefault();
+                location.href = a.href;
+            }
+        });
+    }
+
+    // 9. Keyboard push-up fix for iOS
+    if (isTouchDevice) {
+        const inputEl = document.getElementById('user-input');
+        if (inputEl) {
+            inputEl.addEventListener('focus', () => {
+                setTimeout(() => {
+                    window.scrollTo(0, 0);
+                    document.body.scrollTop = 0;
+                }, 300);
+            });
+        }
+    }
+    </script>
 </body>
 </html>
 """
@@ -963,20 +1131,27 @@ def manifest():
     manifest_data = {
         "name": "Xavier AnyControl",
         "short_name": "AnyControl",
+        "description": "Xavier AI Agent - Intelligent Control Assistant",
         "start_url": "/",
+        "scope": "/",
         "display": "standalone",
+        "orientation": "portrait",
         "background_color": "#111827",
         "theme_color": "#111827",
+        "lang": "zh-CN",
+        "categories": ["productivity", "utilities"],
         "icons": [
             {
                 "src": "https://img.icons8.com/fluency/192/robot-2.png",
                 "sizes": "192x192",
-                "type": "image/png"
+                "type": "image/png",
+                "purpose": "any maskable"
             },
             {
                 "src": "https://img.icons8.com/fluency/512/robot-2.png",
                 "sizes": "512x512",
-                "type": "image/png"
+                "type": "image/png",
+                "purpose": "any maskable"
             }
         ]
     }
@@ -984,6 +1159,57 @@ def manifest():
         response=__import__("json").dumps(manifest_data),
         mimetype="application/manifest+json"
     )
+
+
+@app.route("/sw.js")
+def service_worker():
+    """Serve Service Worker for PWA offline support and caching."""
+    sw_code = """
+// Xavier AnyControl Service Worker
+const CACHE_NAME = 'anycontrol-v1';
+const PRECACHE_URLS = ['/'];
+
+self.addEventListener('install', event => {
+    self.skipWaiting();
+    event.waitUntil(
+        caches.open(CACHE_NAME).then(cache => cache.addAll(PRECACHE_URLS))
+    );
+});
+
+self.addEventListener('activate', event => {
+    event.waitUntil(
+        caches.keys().then(keys =>
+            Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+        ).then(() => self.clients.claim())
+    );
+});
+
+self.addEventListener('fetch', event => {
+    // Network-first strategy for API calls, cache-first for static assets
+    if (event.request.url.includes('/proxy_') || event.request.url.includes('/ask')) {
+        event.respondWith(
+            fetch(event.request).catch(() => caches.match(event.request))
+        );
+    } else {
+        event.respondWith(
+            caches.match(event.request).then(cached => {
+                const fetched = fetch(event.request).then(response => {
+                    const clone = response.clone();
+                    caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+                    return response;
+                }).catch(() => cached);
+                return cached || fetched;
+            })
+        );
+    }
+});
+"""
+    return app.response_class(
+        response=sw_code,
+        mimetype="application/javascript",
+        headers={"Service-Worker-Allowed": "/"}
+    )
+
 
 @app.route("/proxy_login", methods=["POST"])
 def proxy_login():
