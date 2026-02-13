@@ -74,8 +74,8 @@ def download_bark_server():
         print("⚠️  当前平台不支持自动下载 Bark Server，请手动安装")
         return False
 
-    # Bark Server GitHub release URL
-    url = f"https://github.com/nicennnnnnnlee/bark-server/releases/latest/download/bark-server_{os_name}_{arch}"
+    # Bark Server GitHub release URL (official repo: Finb/bark-server)
+    url = f"https://github.com/Finb/bark-server/releases/latest/download/bark-server_{os_name}_{arch}"
 
     print(f"📥 正在下载 Bark Server ({os_name}/{arch})...")
     print(f"   来源: {url}")
