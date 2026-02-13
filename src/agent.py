@@ -46,7 +46,9 @@ class UserAwareToolNode:
         self._get_mcp_tools = get_mcp_tools_fn
 
     async def __call__(self, state, config: RunnableConfig):
-        thread_id = config.get("configurable", {}).get("thread_id", "anonymous")
+        # Get user_id directly from state (injected by mainagent) instead of
+        # parsing thread_id, because user_id itself may contain the separator.
+        user_id = state.get("user_id") or "anonymous"
 
         last_message = state["messages"][-1]
         if not hasattr(last_message, "tool_calls") or not last_message.tool_calls:
@@ -69,7 +71,7 @@ class UserAwareToolNode:
                 print(f">>> [tools] 🚫 拦截禁用工具调用: {tc['name']}")
             else:
                 if tc["name"] in USER_INJECTED_TOOLS:
-                    tc["args"]["username"] = thread_id
+                    tc["args"]["username"] = user_id
                 allowed_calls.append(tc)
                 print(f">>> [tools] ✅ 调用工具: {tc['name']}")
 

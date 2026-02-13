@@ -134,6 +134,8 @@ HTML_TEMPLATE = """
                 </div>
                 <div class="flex items-center space-x-2">
                     <div id="uid-display" class="text-sm font-mono bg-gray-100 px-3 py-1 rounded border"></div>
+                    <div id="session-display" class="text-xs font-mono bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-200 cursor-default" title="当前对话号"></div>
+                    <button onclick="handleNewSession()" class="text-xs bg-green-50 text-green-600 hover:bg-green-100 px-2 py-1 rounded border border-green-200 transition-colors" title="开启新对话">+ 新对话</button>
                     <button onclick="handleLogout()" class="text-xs text-gray-400 hover:text-red-500 px-2 py-1 rounded transition-colors" title="切换用户">退出</button>
                 </div>
             </header>
@@ -268,7 +270,46 @@ HTML_TEMPLATE = """
         });
 
         let currentUserId = null;
+        let currentSessionId = null;
         let currentAbortController = null;
+
+        // ===== Session (conversation) ID management =====
+        function generateSessionId() {
+            return Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
+        }
+
+        function initSession() {
+            let saved = sessionStorage.getItem('sessionId');
+            if (!saved) {
+                saved = generateSessionId();
+                sessionStorage.setItem('sessionId', saved);
+            }
+            currentSessionId = saved;
+            updateSessionDisplay();
+        }
+
+        function updateSessionDisplay() {
+            const el = document.getElementById('session-display');
+            if (el && currentSessionId) {
+                el.textContent = '#' + currentSessionId.slice(-6);
+                el.title = '对话号: ' + currentSessionId;
+            }
+        }
+
+        function handleNewSession() {
+            if (!confirm('开启新对话？当前对话的历史记录将保留，可通过切回对话号恢复。')) return;
+            currentSessionId = generateSessionId();
+            sessionStorage.setItem('sessionId', currentSessionId);
+            updateSessionDisplay();
+            // Clear chat box for new conversation
+            const chatBox = document.getElementById('chat-box');
+            chatBox.innerHTML = `
+                <div class="flex justify-start">
+                    <div class="message-agent bg-white border p-4 max-w-[85%] shadow-sm text-gray-700">
+                        🆕 已开启新对话。我是 Xavier 智能助手，请输入你的指令。
+                    </div>
+                </div>`;
+        }
 
         // ===== 登录逻辑 =====
         async function handleLogin() {
@@ -309,6 +350,7 @@ HTML_TEMPLATE = """
                 currentUserId = name;
                 sessionStorage.setItem('userId', name);
                 sessionStorage.setItem('authToken', data.token || '');
+                initSession();
 
                 document.getElementById('uid-display').textContent = 'UID: ' + name;
                 document.getElementById('login-screen').style.display = 'none';
@@ -327,8 +369,10 @@ HTML_TEMPLATE = """
 
         function handleLogout() {
             currentUserId = null;
+            currentSessionId = null;
             sessionStorage.removeItem('userId');
             sessionStorage.removeItem('authToken');
+            sessionStorage.removeItem('sessionId');
             fetch("/proxy_logout", { method: 'POST' });
             document.getElementById('chat-screen').style.display = 'none';
             document.getElementById('login-screen').style.display = 'flex';
@@ -427,6 +471,7 @@ HTML_TEMPLATE = """
             const saved = sessionStorage.getItem('userId');
             if (saved) {
                 currentUserId = saved;
+                initSession();
                 document.getElementById('uid-display').textContent = 'UID: ' + saved;
                 document.getElementById('login-screen').style.display = 'none';
                 document.getElementById('chat-screen').style.display = 'flex';
@@ -468,7 +513,11 @@ HTML_TEMPLATE = """
                 currentAbortController = null;
             }
             try {
-                await fetch("/proxy_cancel", { method: 'POST' });
+                await fetch("/proxy_cancel", {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ session_id: currentSessionId })
+                });
             } catch(e) { /* ignore */ }
         }
 
@@ -522,7 +571,7 @@ HTML_TEMPLATE = """
                 const response = await fetch("/proxy_ask_stream", {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ content: text, enabled_tools: getEnabledTools() }),
+                    body: JSON.stringify({ content: text, enabled_tools: getEnabledTools(), session_id: currentSessionId }),
                     signal: currentAbortController.signal
                 });
 
@@ -952,11 +1001,13 @@ def proxy_ask_stream():
 
     user_content = request.json.get("content")
     enabled_tools = request.json.get("enabled_tools")  # None or list
+    session_id = request.json.get("session_id", "default")
     payload = {
         "user_id": user_id,
         "password": password,
         "text": user_content,
         "enabled_tools": enabled_tools,
+        "session_id": session_id,
     }
 
     try:
@@ -991,8 +1042,9 @@ def proxy_cancel():
     password = session.get("password")
     if not user_id or not password:
         return jsonify({"error": "未登录"}), 401
+    session_id = request.json.get("session_id", "default") if request.is_json else "default"
     try:
-        r = requests.post(LOCAL_AGENT_CANCEL_URL, json={"user_id": user_id, "password": password}, timeout=5)
+        r = requests.post(LOCAL_AGENT_CANCEL_URL, json={"user_id": user_id, "password": password, "session_id": session_id}, timeout=5)
         return jsonify(r.json())
     except Exception as e:
         return jsonify({"error": str(e)}), 500

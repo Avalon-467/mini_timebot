@@ -71,6 +71,7 @@ class UserRequest(BaseModel):
     password: str
     text: str
     enabled_tools: Optional[list[str]] = None
+    session_id: str = "default"
 
 class SystemTriggerRequest(BaseModel):
     user_id: str
@@ -79,6 +80,7 @@ class SystemTriggerRequest(BaseModel):
 class CancelRequest(BaseModel):
     user_id: str
     password: str
+    session_id: str = "default"
 
 
 # --- Routes ---
@@ -101,7 +103,9 @@ async def ask_agent(req: UserRequest):
     if not verify_password(req.user_id, req.password):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
-    config = {"configurable": {"thread_id": req.user_id}}
+    # Compose thread_id: user_id#session_id for conversation isolation
+    thread_id = f"{req.user_id}#{req.session_id}"
+    config = {"configurable": {"thread_id": thread_id}}
     user_input = {
         "messages": [HumanMessage(content=req.text)],
         "trigger_source": "user",
@@ -118,10 +122,13 @@ async def ask_agent_stream(req: UserRequest):
     if not verify_password(req.user_id, req.password):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
-    # Cancel previous active task for this user
-    await agent.cancel_task(req.user_id)
+    # Cancel previous active task for this user+session
+    task_key = f"{req.user_id}#{req.session_id}"
+    await agent.cancel_task(task_key)
 
-    config = {"configurable": {"thread_id": req.user_id}}
+    # Compose thread_id: user_id#session_id for conversation isolation
+    thread_id = f"{req.user_id}#{req.session_id}"
+    config = {"configurable": {"thread_id": thread_id}}
     user_input = {
         "messages": [HumanMessage(content=req.text)],
         "trigger_source": "user",
@@ -131,7 +138,7 @@ async def ask_agent_stream(req: UserRequest):
 
     queue: asyncio.Queue[str | None] = asyncio.Queue()
 
-    async def _stream_worker():
+    async def _stream_worker(task_key=task_key):
         """在独立 Task 中运行 astream_events，产出数据写入 queue"""
         collected_tokens = []
         try:
@@ -180,10 +187,10 @@ async def ask_agent_stream(req: UserRequest):
             await queue.put("data: [DONE]\n\n")
         finally:
             await queue.put(None)
-            agent.unregister_task(req.user_id)
+            agent.unregister_task(task_key)
 
     task = asyncio.create_task(_stream_worker())
-    agent.register_task(req.user_id, task)
+    agent.register_task(task_key, task)
 
     async def event_generator():
         while True:
@@ -208,13 +215,16 @@ async def cancel_agent(req: CancelRequest):
     """终止指定用户的智能体思考"""
     if not verify_password(req.user_id, req.password):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
-    await agent.cancel_task(req.user_id)
+    task_key = f"{req.user_id}#{req.session_id}"
+    await agent.cancel_task(task_key)
     return {"status": "success", "message": "已终止"}
 
 
 @app.post("/system_trigger")
 async def system_trigger(req: SystemTriggerRequest):
-    config = {"configurable": {"thread_id": req.user_id}}
+    # System triggers use a dedicated session to avoid mixing with user conversations
+    thread_id = f"{req.user_id}#__system__"
+    config = {"configurable": {"thread_id": thread_id}}
     system_input = {
         "messages": [HumanMessage(content=f"执行指令: {req.text}")],
         "trigger_source": "system",
