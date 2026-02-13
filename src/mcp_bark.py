@@ -22,6 +22,9 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(current_dir)
 load_dotenv(dotenv_path=os.path.join(root_dir, "config", ".env"))
 
+# Placeholder value written by launcher.py when no public tunnel is configured
+PLACEHOLDER = "wait to set"
+
 # Local Bark Server endpoint (never exposed to LLM)
 BARK_LOCAL_URL = "http://127.0.0.1:58010"
 
@@ -47,10 +50,14 @@ def _read_bark_key(username: str) -> str | None:
 def _get_public_url() -> str | None:
     """Read the frontend public URL from .env for click-through redirect.
     This should be the frontend tunnel URL (PUBLIC_DOMAIN), not the Bark server URL.
+    Returns None if not configured or still set to placeholder 'wait to set'.
     """
     # Re-read .env each time to pick up dynamic updates
     load_dotenv(dotenv_path=os.path.join(root_dir, "config", ".env"), override=True)
-    return os.getenv("PUBLIC_DOMAIN")
+    value = os.getenv("PUBLIC_DOMAIN", "").strip()
+    if not value or value == PLACEHOLDER:
+        return None
+    return value
 
 
 @mcp.tool()
@@ -154,7 +161,11 @@ async def get_push_status(username: str) -> str:
     if public_url:
         status_lines.append(f"  ✅ 公网地址: {public_url}")
     else:
-        status_lines.append("  ⚠️ 公网地址: 未配置（推送后点击通知无法跳转到网页）")
+        raw = os.getenv("PUBLIC_DOMAIN", "").strip()
+        if raw == PLACEHOLDER:
+            status_lines.append("  ⏳ 公网地址: 等待配置（当前为 'wait to set'，请替换为真实地址或运行 tunnel.py）")
+        else:
+            status_lines.append("  ⚠️ 公网地址: 未配置（推送后点击通知无法跳转到网页）")
 
     # Check if Bark Server is running
     async with httpx.AsyncClient() as client:

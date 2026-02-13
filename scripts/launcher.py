@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 # 切换到项目根目录
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(PROJECT_ROOT)
+ENV_PATH = os.path.join(PROJECT_ROOT, "config", ".env")
 
 # 检查 .env 配置
 if not os.path.exists("config/.env"):
@@ -103,6 +104,42 @@ def ensure_bark_server():
         return True
     print("⚠️  未找到 Bark Server，开始自动下载...")
     return download_bark_server()
+
+
+PLACEHOLDER = "wait to set"
+
+
+def _init_env_placeholder(key: str):
+    """If the given key is missing or empty in config/.env, write 'wait to set' as placeholder."""
+    current_value = os.getenv(key, "").strip()
+    if current_value and current_value != PLACEHOLDER:
+        # Already has a real value (e.g. set by tunnel.py), skip
+        return
+
+    # Write placeholder to .env so users know the field exists
+    if os.path.exists(ENV_PATH):
+        with open(ENV_PATH, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    else:
+        lines = []
+
+    key_found = False
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith(f"{key}=") or stripped.startswith(f"# {key}="):
+            new_lines.append(f"{key}={PLACEHOLDER}\n")
+            key_found = True
+        else:
+            new_lines.append(line)
+
+    if not key_found:
+        if new_lines and not new_lines[-1].endswith("\n"):
+            new_lines.append("\n")
+        new_lines.append(f"{key}={PLACEHOLDER}\n")
+
+    with open(ENV_PATH, "w", encoding="utf-8") as f:
+        f.writelines(new_lines)
 
 
 def cleanup():
@@ -188,6 +225,11 @@ if bark_available:
     procs.append(bark_proc)
     time.sleep(1)
     print(f"   ✅ Bark Server 已启动 (PID: {bark_proc.pid})")
+
+    # If no public tunnel is configured, write placeholder to .env
+    # so users know these fields exist and can set them later
+    _init_env_placeholder("PUBLIC_DOMAIN")
+    _init_env_placeholder("BARK_PUBLIC_URL")
 else:
     print("⚠️  跳过 Bark Server 启动（二进制不可用），推送功能不可用")
 
