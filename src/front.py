@@ -151,13 +151,13 @@ HTML_TEMPLATE = """
         .oasis-discussion-box { height: calc(100vh - 340px); overflow-y: auto; }
         .oasis-conclusion-box { background: linear-gradient(135deg, #f0fdf4, #ecfdf5); border: 1px solid #86efac; border-radius: 12px; padding: 12px; }
         .main-layout { display: flex; height: 100vh; max-width: 100%; }
-        .chat-main { flex: 1; min-width: 0; max-width: 900px; display: flex; }
+        .chat-main { flex: 1; min-width: 0; max-width: 900px; display: flex; flex-direction: column; }
 
         /* === Mobile responsive === */
         @media (max-width: 768px) {
             .main-layout { flex-direction: column; }
-            .chat-main { max-width: 100%; width: 100%; height: 100dvh; }
-            .chat-container { height: auto !important; flex: 1; min-height: 0; }
+            .chat-main { max-width: 100%; width: 100%; height: 100%; }
+            .chat-container { height: auto !important; flex: 1; min-height: 0; overflow-y: auto; }
             /* OASIS: overlay mode on mobile */
             .oasis-divider { display: none !important; }
             .oasis-panel {
@@ -178,6 +178,13 @@ HTML_TEMPLATE = """
             /* Reduce padding on mobile */
             #chat-box { padding: 12px !important; }
             .message-agent, .message-user { max-width: 92% !important; }
+            /* Ensure input area stays visible */
+            .p-2.sm\:p-4.border-t { 
+                flex-shrink: 0 !important; 
+                min-height: fit-content !important;
+                position: relative !important;
+                z-index: 5 !important;
+            }
             /* Increase font size on mobile */
             .message-content, .message-agent, .message-user { font-size: 16px !important; }
             .message-content p, .message-content li { font-size: 16px !important; }
@@ -1194,15 +1201,59 @@ HTML_TEMPLATE = """
         });
     }
 
-    // 9. Keyboard push-up fix for iOS
+    // 9. Keyboard handling for mobile/PWA using visualViewport
+    if (isTouchDevice && window.visualViewport) {
+        const chatMain = document.querySelector('.chat-main');
+        const inputWrapper = document.querySelector('.p-2.sm\\:p-4.border-t');
+        
+        let pendingUpdate = null;
+        function updateLayout() {
+            const viewportHeight = window.visualViewport.height;
+            const keyboardHeight = window.innerHeight - viewportHeight;
+            
+            if (keyboardHeight > 50) {
+                // Keyboard is open
+                document.body.style.height = viewportHeight + 'px';
+                if (chatMain) chatMain.style.height = viewportHeight + 'px';
+                // Scroll input into view
+                if (inputWrapper) {
+                    inputWrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+            } else {
+                // Keyboard is closed
+                document.body.style.height = '100vh';
+                if (chatMain) chatMain.style.height = '100%';
+            }
+        }
+        
+        window.visualViewport.addEventListener('resize', () => {
+            if (pendingUpdate) cancelAnimationFrame(pendingUpdate);
+            pendingUpdate = requestAnimationFrame(updateLayout);
+        });
+        window.visualViewport.addEventListener('scroll', updateLayout);
+        
+        // Initial setup
+        updateLayout();
+    }
+    
+    // Fallback for older iOS
     if (isTouchDevice) {
         const inputEl = document.getElementById('user-input');
         if (inputEl) {
             inputEl.addEventListener('focus', () => {
                 setTimeout(() => {
-                    window.scrollTo(0, 0);
-                    document.body.scrollTop = 0;
-                }, 300);
+                    // For PWA standalone mode
+                    if (window.visualViewport) {
+                        document.body.style.height = window.visualViewport.height + 'px';
+                    }
+                }, 100);
+            });
+            inputEl.addEventListener('blur', () => {
+                setTimeout(() => {
+                    if (window.visualViewport) {
+                        document.body.style.height = '100vh';
+                    }
+                }, 100);
             });
         }
     }
