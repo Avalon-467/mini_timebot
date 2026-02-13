@@ -54,6 +54,20 @@ HTML_TEMPLATE = """
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
 
     <style>
+        /* === PWA Standalone Mode Fix === */
+        :root {
+            --app-height: 100vh;
+            --safe-top: env(safe-area-inset-top, 0px);
+            --safe-bottom: env(safe-area-inset-bottom, 0px);
+            --safe-left: env(safe-area-inset-left, 0px);
+            --safe-right: env(safe-area-inset-right, 0px);
+        }
+        
+        /* PWA standalone mode: use dynamic viewport height */
+        @supports (height: 100dvh) {
+            :root { --app-height: 100dvh; }
+        }
+        
         /* === Native App Behavior (mobile only) === */
         html, body {
             overscroll-behavior: none;
@@ -154,13 +168,13 @@ HTML_TEMPLATE = """
         .expert-default { background: linear-gradient(135deg, #6b7280, #4b5563); }
         .oasis-discussion-box { height: calc(100vh - 340px); overflow-y: auto; }
         .oasis-conclusion-box { background: linear-gradient(135deg, #f0fdf4, #ecfdf5); border: 1px solid #86efac; border-radius: 12px; padding: 12px; }
-        .main-layout { display: flex; height: 100vh; max-width: 100%; overflow: hidden; }
-        .chat-main { flex: 1; min-width: 0; max-width: 900px; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        .main-layout { display: flex; height: var(--app-height, 100vh); max-width: 100%; overflow: hidden; }
+        .chat-main { flex: 1; min-width: 0; max-width: 900px; display: flex; flex-direction: column; height: var(--app-height, 100vh); overflow: hidden; }
 
         /* === Mobile responsive === */
         @media (max-width: 768px) {
-            .main-layout { flex-direction: column; height: 100vh; overflow: hidden; }
-            .chat-main { max-width: 100%; width: 100%; height: 100vh; }
+            .main-layout { flex-direction: column; height: var(--app-height, 100vh); overflow: hidden; }
+            .chat-main { max-width: 100%; width: 100%; height: var(--app-height, 100vh); }
             /* Header: fixed at top */
             header { flex-shrink: 0; position: relative; min-height: 60px; height: auto; }
             /* Chat container: scrollable middle area */
@@ -1210,17 +1224,27 @@ HTML_TEMPLATE = """
         const chatMain = document.querySelector('.chat-main');
         const chatContainer = document.querySelector('.chat-container');
         
+        // PWA Standalone mode detection
+        const isPWA = window.matchMedia('(display-mode: standalone)').matches || 
+                      window.navigator.standalone === true;
+        
         function handleViewportChange() {
             const vh = window.visualViewport.height;
-            // Only adjust if keyboard is likely open (viewport significantly smaller)
-            if (vh < window.innerHeight * 0.85) {
-                document.documentElement.style.setProperty('--viewport-height', vh + 'px');
+            const windowHeight = window.innerHeight;
+            
+            // For PWA standalone: always use visualViewport height
+            // For browser: only adjust when keyboard is open (viewport significantly smaller)
+            if (isPWA || vh < windowHeight * 0.85) {
+                document.documentElement.style.setProperty('--app-height', vh + 'px');
                 if (chatMain) chatMain.style.height = vh + 'px';
             } else {
-                document.documentElement.style.removeProperty('--viewport-height');
-                if (chatMain) chatMain.style.height = '100vh';
+                document.documentElement.style.removeProperty('--app-height');
+                if (chatMain) chatMain.style.height = '';
             }
         }
+        
+        // Initial call
+        handleViewportChange();
         
         window.visualViewport.addEventListener('resize', handleViewportChange);
         window.visualViewport.addEventListener('scroll', handleViewportChange);
