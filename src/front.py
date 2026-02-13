@@ -19,6 +19,10 @@ LOCAL_AGENT_CANCEL_URL = f"http://127.0.0.1:{PORT_AGENT}/cancel"
 LOCAL_LOGIN_URL = f"http://127.0.0.1:{PORT_AGENT}/login"
 LOCAL_TOOLS_URL = f"http://127.0.0.1:{PORT_AGENT}/tools"
 
+# OASIS Forum proxy
+PORT_OASIS = int(os.getenv("PORT_OASIS", "51202"))
+OASIS_BASE_URL = f"http://127.0.0.1:{PORT_OASIS}"
+
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -53,6 +57,39 @@ HTML_TEMPLATE = """
         .tool-toggle-btn:hover { color: #2563eb; }
         .tool-toggle-icon { display: inline-block; transition: transform 0.3s ease; }
         .tool-toggle-icon.open { transform: rotate(180deg); }
+
+        /* OASIS Panel Styles */
+        .oasis-panel { width: 380px; min-width: 320px; transition: width 0.3s ease; }
+        .oasis-panel.collapsed-panel { width: 48px; min-width: 48px; }
+        .oasis-panel.collapsed-panel .oasis-content { display: none; }
+        .oasis-panel.collapsed-panel .oasis-expand-btn { display: flex; }
+        .oasis-expand-btn { display: none; writing-mode: vertical-lr; text-orientation: mixed; }
+        .oasis-topic-item { transition: all 0.2s ease; cursor: pointer; }
+        .oasis-topic-item:hover { background: #eff6ff; }
+        .oasis-topic-item.active { background: #dbeafe; border-left: 3px solid #2563eb; }
+        .oasis-post { animation: slideIn 0.3s ease; }
+        @keyframes slideIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .oasis-vote-bar { height: 6px; border-radius: 3px; overflow: hidden; }
+        .oasis-vote-up { background: #22c55e; }
+        .oasis-vote-down { background: #ef4444; }
+        .oasis-status-badge { font-size: 10px; padding: 2px 8px; border-radius: 9999px; font-weight: 600; }
+        .oasis-status-pending { background: #fef3c7; color: #92400e; }
+        .oasis-status-discussing { background: #dbeafe; color: #1e40af; animation: pulse-bg 2s infinite; }
+        .oasis-status-concluded { background: #d1fae5; color: #065f46; }
+        .oasis-status-error { background: #fee2e2; color: #991b1b; }
+        @keyframes pulse-bg { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+        .oasis-expert-avatar { width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; color: white; flex-shrink: 0; }
+        .expert-creative { background: linear-gradient(135deg, #f59e0b, #f97316); }
+        .expert-critical { background: linear-gradient(135deg, #ef4444, #dc2626); }
+        .expert-data { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+        .expert-synthesis { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
+        .expert-default { background: linear-gradient(135deg, #6b7280, #4b5563); }
+        .oasis-discussion-box { height: calc(100vh - 340px); overflow-y: auto; }
+        .oasis-conclusion-box { background: linear-gradient(135deg, #f0fdf4, #ecfdf5); border: 1px solid #86efac; border-radius: 12px; padding: 12px; }
+        .main-layout { display: flex; height: 100vh; max-width: 100%; }
+        .chat-main { flex: 1; min-width: 0; max-width: 900px; }
+        .oasis-divider { width: 1px; background: #e5e7eb; cursor: col-resize; flex-shrink: 0; }
+        .oasis-divider:hover { background: #3b82f6; width: 3px; }
     </style>
 </head>
 <body class="bg-gray-100 font-sans leading-normal tracking-normal">
@@ -82,63 +119,142 @@ HTML_TEMPLATE = """
         </div>
     </div>
 
-    <!-- ========== 聊天页（初始隐藏） ========== -->
-    <div id="chat-screen" class="max-w-4xl mx-auto h-screen flex-col shadow-2xl bg-white border-x border-gray-200" style="display:none;">
-        <header class="p-4 border-b bg-white flex justify-between items-center sticky top-0 z-10">
-            <div class="flex items-center space-x-3">
-                <div class="bg-blue-600 p-2 rounded-lg text-white font-bold text-xl">X</div>
-                <div>
-                    <h1 class="text-lg font-bold text-gray-800 leading-tight">Xavier AnyControl</h1>
-                    <p class="text-xs text-green-500 flex items-center">● 链路已加密 (HTTPS)</p>
-                </div>
-            </div>
-            <div class="flex items-center space-x-2">
-                <div id="uid-display" class="text-sm font-mono bg-gray-100 px-3 py-1 rounded border"></div>
-                <button onclick="handleLogout()" class="text-xs text-gray-400 hover:text-red-500 px-2 py-1 rounded transition-colors" title="切换用户">退出</button>
-            </div>
-        </header>
+    <!-- ========== 主布局（聊天 + OASIS）（初始隐藏） ========== -->
+    <div id="chat-screen" class="main-layout" style="display:none;">
 
-        <div id="chat-box" class="chat-container overflow-y-auto p-6 space-y-6 flex-grow bg-gray-50">
-            <div class="flex justify-start">
-                <div class="message-agent bg-white border p-4 max-w-[85%] shadow-sm text-gray-700">
-                    你好！我是 Xavier 智能助手。我已经准备好为你服务，请输入你的指令。
+        <!-- ===== 左侧：聊天区 ===== -->
+        <div class="chat-main h-screen flex-col bg-white border-x border-gray-200 shadow-2xl">
+            <header class="p-4 border-b bg-white flex justify-between items-center sticky top-0 z-10">
+                <div class="flex items-center space-x-3">
+                    <div class="bg-blue-600 p-2 rounded-lg text-white font-bold text-xl">X</div>
+                    <div>
+                        <h1 class="text-lg font-bold text-gray-800 leading-tight">Xavier AnyControl</h1>
+                        <p class="text-xs text-green-500 flex items-center">● 链路已加密 (HTTPS)</p>
+                    </div>
                 </div>
+                <div class="flex items-center space-x-2">
+                    <div id="uid-display" class="text-sm font-mono bg-gray-100 px-3 py-1 rounded border"></div>
+                    <button onclick="handleLogout()" class="text-xs text-gray-400 hover:text-red-500 px-2 py-1 rounded transition-colors" title="切换用户">退出</button>
+                </div>
+            </header>
+
+            <div id="chat-box" class="chat-container overflow-y-auto p-6 space-y-6 flex-grow bg-gray-50">
+                <div class="flex justify-start">
+                    <div class="message-agent bg-white border p-4 max-w-[85%] shadow-sm text-gray-700">
+                        你好！我是 Xavier 智能助手。我已经准备好为你服务，请输入你的指令。
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-4 border-t bg-white">
+                <!-- Tool List Panel -->
+                <div id="tool-panel-wrapper" class="mb-2" style="display:none;">
+                    <div class="flex items-center justify-between mb-1">
+                        <div class="tool-toggle-btn flex items-center space-x-1 text-sm text-gray-500 font-medium" onclick="toggleToolPanel()">
+                            <span>🧰 可用工具</span>
+                            <span id="tool-count" class="text-xs text-gray-400"></span>
+                            <span id="tool-toggle-icon" class="tool-toggle-icon text-xs">▼</span>
+                        </div>
+                    </div>
+                    <div id="tool-panel" class="tool-panel collapsed">
+                        <div id="tool-list" class="flex flex-wrap gap-2 p-2 bg-gray-50 rounded-xl border border-gray-200">
+                            <!-- tools will be injected here -->
+                        </div>
+                    </div>
+                </div>
+                <div class="flex items-end space-x-3">
+                    <div class="flex-grow">
+                        <textarea id="user-input" rows="1" 
+                            class="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none transition-all"
+                            placeholder="输入指令，Shift + Enter 换行..."></textarea>
+                    </div>
+                    <button onclick="handleSend()" id="send-btn"
+                        class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl transition-all font-bold shadow-lg h-[50px]">
+                        发送
+                    </button>
+                    <button onclick="handleCancel()" id="cancel-btn"
+                        class="bg-red-500 hover:bg-red-600 text-white px-6 py-3 rounded-xl transition-all font-bold shadow-lg h-[50px]"
+                        style="display:none;">
+                        终止
+                    </button>
+                </div>
+                <p class="text-[10px] text-center text-gray-400 mt-3 font-mono">Secured by Nginx Reverse Proxy & SSH Tunnel</p>
             </div>
         </div>
 
-        <div class="p-4 border-t bg-white">
-            <!-- Tool List Panel -->
-            <div id="tool-panel-wrapper" class="mb-2" style="display:none;">
-                <div class="flex items-center justify-between mb-1">
-                    <div class="tool-toggle-btn flex items-center space-x-1 text-sm text-gray-500 font-medium" onclick="toggleToolPanel()">
-                        <span>🧰 可用工具</span>
-                        <span id="tool-count" class="text-xs text-gray-400"></span>
-                        <span id="tool-toggle-icon" class="tool-toggle-icon text-xs">▼</span>
+        <!-- ===== 分割线 ===== -->
+        <div class="oasis-divider" id="oasis-divider"></div>
+
+        <!-- ===== 右侧：OASIS 讨论面板 ===== -->
+        <div class="oasis-panel bg-white border-l border-gray-200 flex flex-col h-screen" id="oasis-panel">
+            <!-- Collapsed state expand button -->
+            <div class="oasis-expand-btn items-center justify-center h-full text-gray-400 hover:text-blue-600 cursor-pointer text-sm font-bold" onclick="toggleOasisPanel()">
+                🏛️ O A S I S
+            </div>
+
+            <!-- Panel content -->
+            <div class="oasis-content flex flex-col h-full">
+                <!-- Header -->
+                <div class="p-3 border-b bg-gradient-to-r from-purple-50 to-blue-50 flex items-center justify-between flex-shrink-0">
+                    <div class="flex items-center space-x-2">
+                        <span class="text-lg">🏛️</span>
+                        <div>
+                            <h2 class="text-sm font-bold text-gray-800">OASIS 讨论论坛</h2>
+                            <p class="text-[10px] text-gray-500">多专家并行讨论系统</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-1">
+                        <button onclick="refreshOasisTopics()" class="text-gray-400 hover:text-blue-600 p-1 rounded transition-colors" title="刷新">🔄</button>
+                        <button onclick="toggleOasisPanel()" class="text-gray-400 hover:text-red-500 p-1 rounded transition-colors" title="收起">✕</button>
                     </div>
                 </div>
-                <div id="tool-panel" class="tool-panel collapsed">
-                    <div id="tool-list" class="flex flex-wrap gap-2 p-2 bg-gray-50 rounded-xl border border-gray-200">
-                        <!-- tools will be injected here -->
+
+                <!-- Topic list view -->
+                <div id="oasis-topic-list-view" class="flex flex-col flex-1 overflow-hidden">
+                    <div class="p-3 border-b flex-shrink-0">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-semibold text-gray-600">📋 讨论话题</span>
+                            <span id="oasis-topic-count" class="text-[10px] text-gray-400"></span>
+                        </div>
+                    </div>
+                    <div id="oasis-topic-list" class="flex-1 overflow-y-auto">
+                        <div class="p-6 text-center text-gray-400 text-sm">
+                            <div class="text-3xl mb-2">🏛️</div>
+                            <p>暂无讨论话题</p>
+                            <p class="text-xs mt-1">在聊天中让 Agent 发起 OASIS 讨论</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Topic detail view (hidden by default) -->
+                <div id="oasis-detail-view" class="flex flex-col flex-1 overflow-hidden" style="display:none;">
+                    <!-- Detail header -->
+                    <div class="p-3 border-b flex-shrink-0">
+                        <div class="flex items-center space-x-2">
+                            <button onclick="showOasisTopicList()" class="text-gray-400 hover:text-blue-600 text-sm">← 返回</button>
+                            <span id="oasis-detail-status" class="oasis-status-badge"></span>
+                            <span id="oasis-detail-round" class="text-[10px] text-gray-400"></span>
+                        </div>
+                        <p id="oasis-detail-question" class="text-sm font-semibold text-gray-800 mt-1 line-clamp-2"></p>
+                    </div>
+
+                    <!-- Posts stream -->
+                    <div id="oasis-posts-box" class="oasis-discussion-box flex-1 p-3 space-y-3 bg-gray-50">
+                        <!-- Posts will be injected here -->
+                    </div>
+
+                    <!-- Conclusion area -->
+                    <div id="oasis-conclusion-area" class="p-3 border-t flex-shrink-0" style="display:none;">
+                        <div class="oasis-conclusion-box">
+                            <div class="flex items-center space-x-1 mb-2">
+                                <span class="text-sm">🏆</span>
+                                <span class="text-xs font-bold text-green-800">讨论结论</span>
+                            </div>
+                            <p id="oasis-conclusion-text" class="text-xs text-gray-700 leading-relaxed"></p>
+                        </div>
                     </div>
                 </div>
             </div>
-            <div class="flex items-end space-x-3">
-                <div class="flex-grow">
-                    <textarea id="user-input" rows="1" 
-                        class="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none transition-all"
-                        placeholder="输入指令，Shift + Enter 换行..."></textarea>
-                </div>
-                <button onclick="handleSend()" id="send-btn"
-                    class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl transition-all font-bold shadow-lg h-[50px]">
-                    发送
-                </button>
-                <button onclick="handleCancel()" id="cancel-btn"
-                    class="bg-red-500 hover:bg-red-600 text-white px-6 py-3 rounded-xl transition-all font-bold shadow-lg h-[50px]"
-                    style="display:none;">
-                    终止
-                </button>
-            </div>
-            <p class="text-[10px] text-center text-gray-400 mt-3 font-mono">Secured by Nginx Reverse Proxy & SSH Tunnel</p>
         </div>
     </div>
 
@@ -152,7 +268,7 @@ HTML_TEMPLATE = """
         });
 
         let currentUserId = null;
-        let currentAbortController = null; // 用于终止流式请求
+        let currentAbortController = null;
 
         // ===== 登录逻辑 =====
         async function handleLogin() {
@@ -191,7 +307,6 @@ HTML_TEMPLATE = """
                 }
 
                 currentUserId = name;
-                // 不存储密码明文到 localStorage，存到 sessionStorage
                 sessionStorage.setItem('userId', name);
                 sessionStorage.setItem('authToken', data.token || '');
 
@@ -199,7 +314,8 @@ HTML_TEMPLATE = """
                 document.getElementById('login-screen').style.display = 'none';
                 document.getElementById('chat-screen').style.display = 'flex';
                 document.getElementById('user-input').focus();
-                loadTools(); // load tool list after login
+                loadTools();
+                refreshOasisTopics(); // Load OASIS topics after login
             } catch (e) {
                 errorDiv.textContent = '网络错误: ' + e.message;
                 errorDiv.classList.remove('hidden');
@@ -227,12 +343,14 @@ HTML_TEMPLATE = """
                         你好！我是 Xavier 智能助手。我已经准备好为你服务，请输入你的指令。
                     </div>
                 </div>`;
+            // Stop OASIS polling
+            stopOasisPolling();
         }
 
         // ===== Tool Panel 逻辑 =====
         let toolPanelOpen = false;
-        let allTools = [];       // [{name, description}]
-        let enabledToolSet = new Set(); // 当前启用的工具名集合
+        let allTools = [];
+        let enabledToolSet = new Set();
 
         function toggleToolPanel() {
             const panel = document.getElementById('tool-panel');
@@ -268,7 +386,6 @@ HTML_TEMPLATE = """
         }
 
         function getEnabledTools() {
-            // If all tools enabled, return null (means "all")
             if (enabledToolSet.size === allTools.length) return null;
             return Array.from(enabledToolSet);
         }
@@ -288,7 +405,7 @@ HTML_TEMPLATE = """
                 }
 
                 allTools = tools;
-                enabledToolSet = new Set(tools.map(t => t.name)); // default: all enabled
+                enabledToolSet = new Set(tools.map(t => t.name));
                 toolList.innerHTML = '';
                 tools.forEach(t => {
                     const tag = document.createElement('span');
@@ -305,20 +422,20 @@ HTML_TEMPLATE = """
             }
         }
 
-        // 页面加载时检查 session（不自动登录，需要重新输入密码）
+        // Session check
         (function checkSession() {
             const saved = sessionStorage.getItem('userId');
             if (saved) {
-                // session 还在（同一标签页未关闭），恢复显示
                 currentUserId = saved;
                 document.getElementById('uid-display').textContent = 'UID: ' + saved;
                 document.getElementById('login-screen').style.display = 'none';
                 document.getElementById('chat-screen').style.display = 'flex';
-                loadTools(); // restore tool list
+                loadTools();
+                refreshOasisTopics();
             }
         })();
 
-        // 登录输入框回车
+        // Login input handlers
         document.getElementById('username-input').addEventListener('keydown', (e) => {
             if (e.key === 'Enter') { e.preventDefault(); document.getElementById('password-input').focus(); }
         });
@@ -346,15 +463,13 @@ HTML_TEMPLATE = """
         }
 
         async function handleCancel() {
-            // 1. 中断前端的 fetch 流读取
             if (currentAbortController) {
                 currentAbortController.abort();
                 currentAbortController = null;
             }
-            // 2. 通知后端终止智能体
             try {
                 await fetch("/proxy_cancel", { method: 'POST' });
-            } catch(e) { /* 忽略 */ }
+            } catch(e) { /* ignore */ }
         }
 
         function appendMessage(content, isUser = false) {
@@ -397,7 +512,6 @@ HTML_TEMPLATE = """
             sendBtn.disabled = true;
             showTyping();
 
-            // 创建 AbortController 用于终止请求
             currentAbortController = new AbortController();
             setStreamingUI(true);
 
@@ -422,7 +536,6 @@ HTML_TEMPLATE = """
                 }
                 if (!response.ok) throw new Error("Agent 响应异常");
 
-                // 创建空的 agent 消息气泡，后续逐步填充
                 agentDiv = appendMessage('', false);
 
                 const reader = response.body.getReader();
@@ -435,18 +548,16 @@ HTML_TEMPLATE = """
 
                     buffer += decoder.decode(value, { stream: true });
                     const lines = buffer.split('\\n');
-                    buffer = lines.pop(); // 保留不完整的行
+                    buffer = lines.pop();
 
                     for (const line of lines) {
                         if (!line.startsWith('data: ')) continue;
                         const payload = line.slice(6);
                         if (payload === '[DONE]') continue;
 
-                        // 反转义：还原换行符
                         const text = payload.replace(/\\\\n/g, '\\n').replace(/\\\\\\\\/g, '\\\\');
                         fullText += text;
 
-                        // 实时渲染 Markdown
                         agentDiv.innerHTML = marked.parse(fullText);
                         agentDiv.querySelectorAll('pre code').forEach((block) => {
                             if (!block.dataset.highlighted) {
@@ -458,7 +569,6 @@ HTML_TEMPLATE = """
                     }
                 }
 
-                // 最终完整渲染一次（确保 Markdown 完整解析）
                 if (fullText) {
                     agentDiv.innerHTML = marked.parse(fullText);
                     agentDiv.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
@@ -468,11 +578,14 @@ HTML_TEMPLATE = """
                 if (!fullText) {
                     agentDiv.innerHTML = '<span class="text-gray-400">（无响应）</span>';
                 }
+
+                // After agent response, refresh OASIS topics (in case a new discussion was started)
+                setTimeout(() => refreshOasisTopics(), 1000);
+
             } catch (error) {
                 const typingIndicator = document.getElementById('typing-indicator');
                 if (typingIndicator) typingIndicator.remove();
                 if (error.name === 'AbortError') {
-                    // 用户主动终止：保留已有内容，追加终止标记
                     if (agentDiv) {
                         fullText += '\\n\\n⚠️ 已终止思考';
                         agentDiv.innerHTML = marked.parse(fullText);
@@ -495,6 +608,288 @@ HTML_TEMPLATE = """
         inputField.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
         });
+
+        // ================================================================
+        // ===== OASIS 讨论面板逻辑 =====
+        // ================================================================
+
+        let oasisPanelOpen = true;
+        let oasisCurrentTopicId = null;
+        let oasisPollingTimer = null;
+        let oasisStreamReader = null;
+
+        // Expert avatar mapping
+        const expertAvatars = {
+            '创意专家': { cls: 'expert-creative', icon: '💡' },
+            '批判专家': { cls: 'expert-critical', icon: '🔍' },
+            '数据分析师': { cls: 'expert-data', icon: '📊' },
+            '综合顾问': { cls: 'expert-synthesis', icon: '🎯' },
+        };
+
+        function getExpertAvatar(name) {
+            return expertAvatars[name] || { cls: 'expert-default', icon: '🤖' };
+        }
+
+        function getStatusBadge(status) {
+            const map = {
+                'pending': { cls: 'oasis-status-pending', text: '等待中' },
+                'discussing': { cls: 'oasis-status-discussing', text: '讨论中' },
+                'concluded': { cls: 'oasis-status-concluded', text: '已完成' },
+                'error': { cls: 'oasis-status-error', text: '出错' },
+            };
+            return map[status] || { cls: 'oasis-status-pending', text: status };
+        }
+
+        function formatTime(ts) {
+            const d = new Date(ts * 1000);
+            return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+        }
+
+        function toggleOasisPanel() {
+            const panel = document.getElementById('oasis-panel');
+            oasisPanelOpen = !oasisPanelOpen;
+            if (oasisPanelOpen) {
+                panel.classList.remove('collapsed-panel');
+                refreshOasisTopics();
+            } else {
+                panel.classList.add('collapsed-panel');
+                stopOasisPolling();
+            }
+        }
+
+        function stopOasisPolling() {
+            if (oasisPollingTimer) {
+                clearInterval(oasisPollingTimer);
+                oasisPollingTimer = null;
+            }
+            if (oasisStreamReader) {
+                oasisStreamReader.cancel();
+                oasisStreamReader = null;
+            }
+        }
+
+        async function refreshOasisTopics() {
+            try {
+                const resp = await fetch('/proxy_oasis/topics');
+                console.log('[OASIS] Topics response status:', resp.status);
+                if (!resp.ok) {
+                    console.error('[OASIS] Failed to fetch topics:', resp.status);
+                    return;
+                }
+                const topics = await resp.json();
+                console.log('[OASIS] Topics data:', topics);
+                renderTopicList(topics);
+            } catch (e) {
+                console.error('[OASIS] Failed to load topics:', e);
+            }
+        }
+
+        function renderTopicList(topics) {
+            const container = document.getElementById('oasis-topic-list');
+            const countEl = document.getElementById('oasis-topic-count');
+            countEl.textContent = topics.length + ' 个话题';
+
+            if (topics.length === 0) {
+                container.innerHTML = `
+                    <div class="p-6 text-center text-gray-400 text-sm">
+                        <div class="text-3xl mb-2">🏛️</div>
+                        <p>暂无讨论话题</p>
+                        <p class="text-xs mt-1">在聊天中让 Agent 发起 OASIS 讨论</p>
+                    </div>`;
+                return;
+            }
+
+            // Sort: discussing first, then by created_at desc
+            topics.sort((a, b) => {
+                if (a.status === 'discussing' && b.status !== 'discussing') return -1;
+                if (b.status === 'discussing' && a.status !== 'discussing') return 1;
+                return (b.created_at || 0) - (a.created_at || 0);
+            });
+
+            container.innerHTML = topics.map(t => {
+                const badge = getStatusBadge(t.status);
+                const isActive = t.topic_id === oasisCurrentTopicId;
+                return `
+                    <div class="oasis-topic-item p-3 border-b ${isActive ? 'active' : ''}" onclick="openOasisTopic('${t.topic_id}')">
+                        <div class="flex items-center justify-between mb-1">
+                            <span class="oasis-status-badge ${badge.cls}">${badge.text}</span>
+                            <span class="text-[10px] text-gray-400">${t.created_at ? formatTime(t.created_at) : ''}</span>
+                        </div>
+                        <p class="text-sm text-gray-800 font-medium line-clamp-2">${escapeHtml(t.question)}</p>
+                        <div class="flex items-center space-x-3 mt-1 text-[10px] text-gray-400">
+                            <span>💬 ${t.post_count || 0} 帖</span>
+                            <span>🔄 ${t.current_round}/${t.max_rounds} 轮</span>
+                        </div>
+                    </div>`;
+            }).join('');
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        async function openOasisTopic(topicId) {
+            oasisCurrentTopicId = topicId;
+            stopOasisPolling();
+
+            // Switch to detail view
+            document.getElementById('oasis-topic-list-view').style.display = 'none';
+            document.getElementById('oasis-detail-view').style.display = 'flex';
+
+            // Load topic detail
+            await loadTopicDetail(topicId);
+        }
+
+        function showOasisTopicList() {
+            stopOasisPolling();
+            oasisCurrentTopicId = null;
+            document.getElementById('oasis-detail-view').style.display = 'none';
+            document.getElementById('oasis-topic-list-view').style.display = 'flex';
+            refreshOasisTopics();
+        }
+
+        async function loadTopicDetail(topicId) {
+            try {
+                const resp = await fetch(`/proxy_oasis/topics/${topicId}`);
+                console.log('[OASIS] Detail response status:', resp.status);
+                if (!resp.ok) {
+                    console.error('[OASIS] Failed to fetch detail:', resp.status);
+                    return;
+                }
+                const detail = await resp.json();
+                console.log('[OASIS] Detail data:', detail);
+                console.log('[OASIS] Posts count:', (detail.posts || []).length);
+                renderTopicDetail(detail);
+
+                // If still discussing, start polling for updates
+                if (detail.status === 'discussing' || detail.status === 'pending') {
+                    startDetailPolling(topicId);
+                }
+            } catch (e) {
+                console.warn('Failed to load topic detail:', e);
+            }
+        }
+
+        function renderTopicDetail(detail) {
+            const badge = getStatusBadge(detail.status);
+            document.getElementById('oasis-detail-status').className = 'oasis-status-badge ' + badge.cls;
+            document.getElementById('oasis-detail-status').textContent = badge.text;
+            document.getElementById('oasis-detail-round').textContent = `第 ${detail.current_round}/${detail.max_rounds} 轮`;
+            document.getElementById('oasis-detail-question').textContent = detail.question;
+
+            renderPosts(detail.posts || []);
+
+            // Show/hide conclusion
+            const conclusionArea = document.getElementById('oasis-conclusion-area');
+            if (detail.conclusion && detail.status === 'concluded') {
+                document.getElementById('oasis-conclusion-text').textContent = detail.conclusion;
+                conclusionArea.style.display = 'block';
+            } else {
+                conclusionArea.style.display = 'none';
+            }
+        }
+
+        function renderPosts(posts) {
+            const box = document.getElementById('oasis-posts-box');
+
+            if (posts.length === 0) {
+                box.innerHTML = `
+                    <div class="text-center text-gray-400 text-sm py-8">
+                        <div class="text-2xl mb-2">💭</div>
+                        <p>等待专家发言...</p>
+                    </div>`;
+                return;
+            }
+
+            box.innerHTML = posts.map(p => {
+                const avatar = getExpertAvatar(p.author);
+                const isReply = p.reply_to !== null && p.reply_to !== undefined;
+                const totalVotes = p.upvotes + p.downvotes;
+                const upPct = totalVotes > 0 ? (p.upvotes / totalVotes * 100) : 50;
+
+                return `
+                    <div class="oasis-post bg-white rounded-xl p-3 border shadow-sm ${isReply ? 'ml-4 border-l-2 border-l-blue-300' : ''}">
+                        <div class="flex items-start space-x-2">
+                            <div class="oasis-expert-avatar ${avatar.cls}" title="${escapeHtml(p.author)}">${avatar.icon}</div>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-xs font-semibold text-gray-700">${escapeHtml(p.author)}</span>
+                                    <div class="flex items-center space-x-2 text-[10px] text-gray-400">
+                                        ${isReply ? '<span>↩️ #' + p.reply_to + '</span>' : ''}
+                                        <span>#${p.id}</span>
+                                    </div>
+                                </div>
+                                <p class="text-xs text-gray-600 mt-1 leading-relaxed">${escapeHtml(p.content)}</p>
+                                <div class="flex items-center space-x-3 mt-2">
+                                    <div class="flex items-center space-x-1">
+                                        <span class="text-[10px]">👍 ${p.upvotes}</span>
+                                        <span class="text-[10px]">👎 ${p.downvotes}</span>
+                                    </div>
+                                    ${totalVotes > 0 ? `
+                                        <div class="flex-1 oasis-vote-bar flex">
+                                            <div class="oasis-vote-up" style="width: ${upPct}%"></div>
+                                            <div class="oasis-vote-down" style="width: ${100 - upPct}%"></div>
+                                        </div>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+            }).join('');
+
+            // Auto-scroll to bottom
+            box.scrollTop = box.scrollHeight;
+        }
+
+        function startDetailPolling(topicId) {
+            stopOasisPolling();
+            let lastPostCount = 0;
+            let errorCount = 0;
+            oasisPollingTimer = setInterval(async () => {
+                if (oasisCurrentTopicId !== topicId) {
+                    stopOasisPolling();
+                    return;
+                }
+                try {
+                    const resp = await fetch(`/proxy_oasis/topics/${topicId}`);
+                    if (!resp.ok) {
+                        errorCount++;
+                        console.warn(`OASIS polling error: HTTP ${resp.status}`);
+                        if (errorCount >= 5) {
+                            console.error('OASIS polling failed 5 times, stopping');
+                            stopOasisPolling();
+                        }
+                        return;
+                    }
+                    errorCount = 0;
+                    const detail = await resp.json();
+                    
+                    // Only re-render if posts changed
+                    const currentPostCount = (detail.posts || []).length;
+                    if (currentPostCount !== lastPostCount || detail.status !== 'discussing') {
+                        renderTopicDetail(detail);
+                        lastPostCount = currentPostCount;
+                    }
+
+                    // Stop polling when discussion ends
+                    if (detail.status === 'concluded' || detail.status === 'error') {
+                        stopOasisPolling();
+                        refreshOasisTopics();
+                    }
+                } catch (e) {
+                    errorCount++;
+                    console.warn('OASIS polling error:', e);
+                }
+            }, 1500); // Poll every 1.5 seconds for faster updates
+        }
+
+        // Auto-refresh topic list periodically when panel is open
+        setInterval(() => {
+            if (oasisPanelOpen && !oasisCurrentTopicId && currentUserId) {
+                refreshOasisTopics();
+            }
+        }, 10000); // Every 10 seconds
     </script>
 </body>
 </html>
@@ -615,6 +1010,73 @@ def proxy_tools():
 def proxy_logout():
     session.clear()
     return jsonify({"status": "success"})
+
+
+# ===== OASIS Proxy Routes =====
+
+@app.route("/proxy_oasis/topics")
+def proxy_oasis_topics():
+    """Proxy: list all OASIS discussion topics."""
+    # Note: OASIS is a public forum, don't filter by user_id
+    try:
+        print(f"[OASIS Proxy] Fetching topics from {OASIS_BASE_URL}/topics")
+        r = requests.get(f"{OASIS_BASE_URL}/topics", timeout=10)
+        print(f"[OASIS Proxy] Response status: {r.status_code}, count: {len(r.json()) if r.text else 0}")
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        print(f"[OASIS Proxy] Error fetching topics: {e}")
+        return jsonify([]), 200  # Return empty list on error
+
+
+@app.route("/proxy_oasis/topics/<topic_id>")
+def proxy_oasis_topic_detail(topic_id):
+    """Proxy: get full detail of a specific OASIS discussion."""
+    try:
+        url = f"{OASIS_BASE_URL}/topics/{topic_id}"
+        print(f"[OASIS Proxy] Fetching topic detail from {url}")
+        r = requests.get(url, timeout=10)
+        print(f"[OASIS Proxy] Detail response status: {r.status_code}")
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        print(f"[OASIS Proxy] Error fetching topic detail: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_oasis/topics/<topic_id>/stream")
+def proxy_oasis_topic_stream(topic_id):
+    """Proxy: SSE stream for real-time OASIS discussion updates."""
+    try:
+        r = requests.get(f"{OASIS_BASE_URL}/topics/{topic_id}/stream", stream=True, timeout=300)
+        if r.status_code != 200:
+            return jsonify({"error": f"OASIS returned {r.status_code}"}), r.status_code
+
+        def generate():
+            for line in r.iter_lines(decode_unicode=True):
+                if line:
+                    yield line + "\n\n"
+
+        return Response(
+            generate(),
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_oasis/experts")
+def proxy_oasis_experts():
+    """Proxy: list all OASIS expert agents."""
+    try:
+        r = requests.get(f"{OASIS_BASE_URL}/experts", timeout=10)
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=int(os.getenv("PORT_FRONTEND", "51209")), debug=False)
