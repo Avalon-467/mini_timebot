@@ -178,7 +178,9 @@ HTML_TEMPLATE = """
             .message-agent, .message-user { max-width: 92% !important; }
         }
         /* Hide mobile-only elements on desktop */
-        .mobile-oasis-btn { display: none !important; }
+        @media (min-width: 769px) {
+            .mobile-oasis-btn { display: none !important; }
+        }
         .oasis-divider { width: 1px; background: #e5e7eb; cursor: col-resize; flex-shrink: 0; }
         .oasis-divider:hover { background: #3b82f6; width: 3px; }
     </style>
