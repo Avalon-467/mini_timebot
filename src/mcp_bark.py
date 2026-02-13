@@ -37,6 +37,21 @@ def _get_bark_key_path(username: str) -> str:
     return os.path.join(USER_DATA_DIR, username, "bark_key.txt")
 
 
+def _get_bark_config_path(username: str) -> str:
+    """Return the file path where a user's Bark public URL config is stored."""
+    return os.path.join(USER_DATA_DIR, username, "bark_config.txt")
+
+
+def _read_user_public_url(username: str) -> str | None:
+    """Read user-level public URL from bark_config.txt, return None if not set."""
+    config_path = _get_bark_config_path(username)
+    if os.path.exists(config_path):
+        with open(config_path, "r", encoding="utf-8") as f:
+            url = f.read().strip()
+            return url if url else None
+    return None
+
+
 def _read_bark_key(username: str) -> str | None:
     """Read the Bark key for a given user, return None if not set."""
     key_path = _get_bark_key_path(username)
@@ -47,12 +62,18 @@ def _read_bark_key(username: str) -> str | None:
     return None
 
 
-def _get_public_url() -> str | None:
-    """Read the frontend public URL from .env for click-through redirect.
-    This should be the frontend tunnel URL (PUBLIC_DOMAIN), not the Bark server URL.
+def _get_public_url(username: str | None = None) -> str | None:
+    """Read the frontend public URL for click-through redirect.
+    Priority: user-level bark_config.txt > .env PUBLIC_DOMAIN.
     Returns None if not configured or still set to placeholder 'wait to set'.
     """
-    # Re-read .env each time to pick up dynamic updates
+    # 1. Try user-level config first
+    if username:
+        user_url = _read_user_public_url(username)
+        if user_url:
+            return user_url
+
+    # 2. Fall back to .env
     load_dotenv(dotenv_path=os.path.join(root_dir, "config", ".env"), override=True)
     value = os.getenv("PUBLIC_DOMAIN", "").strip()
     if not value or value == PLACEHOLDER:
@@ -85,6 +106,79 @@ async def set_push_key(username: str, bark_key: str) -> str:
 
 
 @mcp.tool()
+async def set_public_url(username: str, public_url: str) -> str:
+    """
+    Save a custom public URL for the user's push notifications click-through.
+    This overrides the global PUBLIC_DOMAIN from .env for this user.
+    :param username: User identifier (auto-injected by system, do NOT provide)
+    :param public_url: The public URL (e.g. "https://xxx.trycloudflare.com")
+    """
+    if not public_url or not public_url.strip():
+        return "❌ 公网地址不能为空，请提供有效的 URL。"
+
+    public_url = public_url.strip()
+
+    # Ensure user directory exists
+    user_dir = os.path.join(USER_DATA_DIR, username)
+    os.makedirs(user_dir, exist_ok=True)
+
+    config_path = _get_bark_config_path(username)
+    with open(config_path, "w", encoding="utf-8") as f:
+        f.write(public_url)
+
+    return f"✅ 公网地址已保存：{public_url}\n后续推送通知点击后将跳转到此地址。"
+
+
+@mcp.tool()
+async def get_public_url(username: str) -> str:
+    """
+    Get the current public URL configured for push notification click-through.
+    Shows user-level config (if set) and the global .env fallback.
+    :param username: User identifier (auto-injected by system, do NOT provide)
+    """
+    user_url = _read_user_public_url(username)
+
+    # Also check .env fallback
+    load_dotenv(dotenv_path=os.path.join(root_dir, "config", ".env"), override=True)
+    env_url = os.getenv("PUBLIC_DOMAIN", "").strip()
+    env_url = env_url if (env_url and env_url != PLACEHOLDER) else None
+
+    lines = ["🌐 公网地址配置："]
+
+    if user_url:
+        lines.append(f"  ✅ 用户级地址（优先）: {user_url}")
+    else:
+        lines.append("  ⚪ 用户级地址: 未配置")
+
+    if env_url:
+        lines.append(f"  {'⚪' if user_url else '✅'} 全局地址（.env）: {env_url}")
+    else:
+        lines.append("  ⚠️ 全局地址（.env）: 未配置")
+
+    effective = user_url or env_url
+    if effective:
+        lines.append(f"  ➡️ 当前生效地址: {effective}")
+    else:
+        lines.append("  ❌ 当前无可用公网地址，推送点击后无法跳转")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def clear_public_url(username: str) -> str:
+    """
+    Remove the user-level public URL config, falling back to .env setting.
+    :param username: User identifier (auto-injected by system, do NOT provide)
+    """
+    config_path = _get_bark_config_path(username)
+    if os.path.exists(config_path):
+        os.remove(config_path)
+        return "✅ 用户级公网地址已清除，将回退使用全局 .env 配置。"
+    else:
+        return "ℹ️ 当前未配置用户级公网地址，无需清除。"
+
+
+@mcp.tool()
 async def send_push_notification(username: str, title: str, body: str, group: str = "MiniTimeBot") -> str:
     """
     Send a push notification to the user's iPhone via Bark.
@@ -101,8 +195,8 @@ async def send_push_notification(username: str, title: str, body: str, group: st
             "请先告诉我您的 Bark Key（打开 iPhone 上的 Bark App 即可看到）。"
         )
 
-    # 2. Read the public domain for click-through URL
-    public_url = _get_public_url()
+    # 2. Read the public domain for click-through URL (user config > .env)
+    public_url = _get_public_url(username)
     click_url = public_url if public_url else None
 
     # 3. Build the push payload (sent to LOCAL Bark Server only)
@@ -148,7 +242,7 @@ async def get_push_status(username: str) -> str:
     :param username: User identifier (auto-injected by system, do NOT provide)
     """
     bark_key = _read_bark_key(username)
-    public_url = _get_public_url()
+    public_url = _get_public_url(username)
 
     status_lines = ["📱 推送通知配置状态："]
 
@@ -158,8 +252,10 @@ async def get_push_status(username: str) -> str:
     else:
         status_lines.append("  ❌ Bark Key: 未配置")
 
+    user_url = _read_user_public_url(username)
     if public_url:
-        status_lines.append(f"  ✅ 公网地址: {public_url}")
+        source = "用户配置" if user_url else ".env"
+        status_lines.append(f"  ✅ 公网地址: {public_url}（来源: {source}）")
     else:
         raw = os.getenv("PUBLIC_DOMAIN", "").strip()
         if raw == PLACEHOLDER:
