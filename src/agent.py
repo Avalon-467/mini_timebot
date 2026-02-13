@@ -1,0 +1,343 @@
+import os
+import copy
+import asyncio
+from typing import Annotated, TypedDict, Optional
+
+# LangGraph related
+from langgraph.graph import StateGraph, START, END
+from langgraph.graph.message import add_messages
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+# Model related
+from langchain_deepseek import ChatDeepSeek
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langgraph.prebuilt import ToolNode, tools_condition
+
+
+# --- Tools that need automatic username injection ---
+USER_INJECTED_TOOLS = {
+    # File management tools
+    "list_files", "read_file", "write_file", "append_file", "delete_file",
+    # Command execution tools
+    "run_command", "run_python_code",
+}
+
+
+# --- State definition ---
+class AgentState(TypedDict):
+    messages: Annotated[list, add_messages]
+    trigger_source: str
+    enabled_tools: Optional[list[str]]
+    user_id: Optional[str]
+
+
+class UserAwareToolNode:
+    """
+    Custom tool node:
+    1. Reads thread_id from RunnableConfig, auto-injects as username for file/command tools
+    2. Intercepts calls to disabled tools at runtime, returns error ToolMessage
+    """
+    def __init__(self, tools, get_mcp_tools_fn):
+        self.tool_node = ToolNode(tools)
+        self._get_mcp_tools = get_mcp_tools_fn
+
+    async def __call__(self, state, config: RunnableConfig):
+        thread_id = config.get("configurable", {}).get("thread_id", "anonymous")
+
+        last_message = state["messages"][-1]
+        if not hasattr(last_message, "tool_calls") or not last_message.tool_calls:
+            return {"messages": []}
+
+        # Get currently enabled tool set
+        enabled_names = state.get("enabled_tools")
+        if enabled_names is not None:
+            enabled_set = set(enabled_names)
+        else:
+            enabled_set = None  # None = all allowed
+
+        # Separate blocked and allowed calls
+        modified_message = copy.deepcopy(last_message)
+        blocked_calls = []
+        allowed_calls = []
+        for tc in modified_message.tool_calls:
+            if enabled_set is not None and tc["name"] not in enabled_set:
+                blocked_calls.append(tc)
+                print(f">>> [tools] 🚫 拦截禁用工具调用: {tc['name']}")
+            else:
+                if tc["name"] in USER_INJECTED_TOOLS:
+                    tc["args"]["username"] = thread_id
+                allowed_calls.append(tc)
+                print(f">>> [tools] ✅ 调用工具: {tc['name']}")
+
+        result_messages = []
+
+        # For blocked tools, return error ToolMessages directly
+        for tc in blocked_calls:
+            result_messages.append(
+                ToolMessage(
+                    content=f"❌ 工具 '{tc['name']}' 当前已被禁用，无法执行。请用户先在工具面板中启用该工具。",
+                    tool_call_id=tc["id"],
+                )
+            )
+
+        # For allowed tools, execute normally via ToolNode
+        if allowed_calls:
+            modified_message.tool_calls = allowed_calls
+            modified_state = {**state, "messages": state["messages"][:-1] + [modified_message]}
+            tool_result = await self.tool_node.ainvoke(modified_state, config)
+            result_messages.extend(tool_result.get("messages", []))
+
+        return {"messages": result_messages}
+
+
+class MiniTimeAgent:
+    """
+    Encapsulates the full LangGraph agent: MCP tool loading, graph building,
+    invoke/stream interface, task & tool-state management.
+    """
+
+    def __init__(self, src_dir: str, db_path: str):
+        """
+        Args:
+            src_dir:  Path to src/ directory (where mcp_*.py live)
+            db_path:  Path to SQLite checkpoint database
+        """
+        self._src_dir = src_dir
+        self._db_path = db_path
+
+        # Populated during startup
+        self._mcp_tools: list = []
+        self._agent_app = None
+        self._mcp_client: Optional[MultiServerMCPClient] = None
+        self._memory = None
+
+        # Per-user state
+        self._active_tasks: dict[str, asyncio.Task] = {}
+        self._task_lock = asyncio.Lock()
+        self._user_last_tool_state: dict[str, frozenset[str]] = {}
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
+    @property
+    def mcp_tools(self) -> list:
+        return self._mcp_tools
+
+    @property
+    def agent_app(self):
+        return self._agent_app
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+    async def startup(self):
+        """Initialize MCP client, load tools, build LangGraph workflow."""
+        # 1. Open checkpoint DB
+        self._memory = AsyncSqliteSaver.from_conn_string(self._db_path)
+        await self._memory.__aenter__()
+
+        # 2. Start MCP servers
+        self._mcp_client = MultiServerMCPClient({
+            "scheduler_service": {
+                "command": "python",
+                "args": [os.path.join(self._src_dir, "mcp_scheduler.py")],
+                "transport": "stdio",
+            },
+            "search_service": {
+                "command": "python",
+                "args": [os.path.join(self._src_dir, "mcp_search.py")],
+                "transport": "stdio",
+            },
+            "file_service": {
+                "command": "python",
+                "args": [os.path.join(self._src_dir, "mcp_filemanager.py")],
+                "transport": "stdio",
+            },
+            "commander_service": {
+                "command": "python",
+                "args": [os.path.join(self._src_dir, "mcp_commander.py")],
+                "transport": "stdio",
+            },
+        })
+        await self._mcp_client.__aenter__()
+
+        # 3. Fetch tool definitions
+        self._mcp_tools = await self._mcp_client.get_tools()
+
+        # 4. Build LangGraph workflow
+        workflow = StateGraph(AgentState)
+        workflow.add_node("chatbot", self._call_model)
+        workflow.add_node("tools", UserAwareToolNode(self._mcp_tools, lambda: self._mcp_tools))
+        workflow.add_edge(START, "chatbot")
+        workflow.add_conditional_edges("chatbot", tools_condition)
+        workflow.add_edge("tools", "chatbot")
+
+        self._agent_app = workflow.compile(checkpointer=self._memory)
+        print("--- Agent 服务已启动，外部定时/用户输入双兼容就绪 ---")
+
+    async def shutdown(self):
+        """Clean up MCP client and checkpoint DB."""
+        if self._mcp_client:
+            try:
+                await self._mcp_client.__aexit__(None, None, None)
+            except Exception:
+                pass
+        if self._memory:
+            try:
+                await self._memory.__aexit__(None, None, None)
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------
+    # Model factory
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _get_model() -> ChatDeepSeek:
+        api_key = os.getenv("DEEPSEEK_API_KEY")
+        if not api_key:
+            raise ValueError("未检测到 DEEPSEEK_API_KEY，请在环境变量中设置。")
+        return ChatDeepSeek(
+            model="deepseek-chat",
+            api_key=api_key,
+            temperature=0.7,
+            max_tokens=2048,
+            timeout=60,
+            max_retries=2,
+        )
+
+    # ------------------------------------------------------------------
+    # Core graph node
+    # ------------------------------------------------------------------
+    async def _call_model(self, state: AgentState):
+        """LangGraph node: invoke LLM with dynamic tool binding & tool-state notification."""
+
+        # Dynamic tool binding based on enabled_tools
+        all_tools = self._mcp_tools
+        enabled_names = state.get("enabled_tools")
+        if enabled_names is not None:
+            filtered_tools = [t for t in all_tools if t.name in enabled_names]
+        else:
+            filtered_tools = all_tools
+
+        base_model = self._get_model()
+        llm = base_model.bind_tools(filtered_tools) if filtered_tools else base_model
+
+        # --- KV-Cache-friendly tool state management ---
+        all_names = sorted(t.name for t in all_tools)
+        all_tool_list_str = ", ".join(all_names)
+
+        base_prompt = (
+            "你是一个专业的智能助理，具备以下能力：\n"
+            "1. 定时任务管理：可以为用户设置、查看和删除闹钟/定时任务。\n"
+            "2. 联网搜索：当用户询问实时信息、新闻或需要查询资料时，请主动使用搜索工具。\n"
+            "3. 文件管理：可以为用户创建、读取、追加、删除和列出文件。"
+            "调用文件管理工具（list_files, read_file, write_file, append_file, delete_file）时，"
+            "username 参数由系统自动注入，你不需要也不应该提供该参数。\n"
+            "4. 指令执行：可以在用户的安全沙箱目录中执行系统命令和 Python 代码。\n"
+            "   - run_command：执行 shell 命令（ls、grep、cat、curl 等白名单内的命令）\n"
+            "   - run_python_code：执行 Python 代码片段（数据计算、文本处理等）\n"
+            "   - list_allowed_commands：查看允许执行的命令白名单\n"
+            "   调用 run_command 和 run_python_code 时，username 参数由系统自动注入，你不需要也不应该提供该参数。\n\n"
+            "【工具使用规则】\n"
+            "- 只有当用户明确要求【测试工具】或【测试tool】时，才对工具进行测试性调用。"
+            "日常对话中不要主动测试工具。\n"
+            "- 当用户要求你记录、保存、备忘某些事情，或者你判断对话中出现了重要信息值得长期保留时，"
+            "请主动使用文件管理工具将内容写入用户的文件中。\n"
+            "- 当你需要回忆或查询用户之前记录的长期信息时，请使用文件管理工具读取用户的文件。\n"
+            "- 当用户要求执行命令、运行代码、查看系统信息等操作时，使用指令执行工具。\n"
+            "- 对于复杂的数据处理任务，优先使用 run_python_code 而非多个 shell 命令。\n\n"
+            f"【默认可用工具列表】\n{all_tool_list_str}\n"
+            "以上工具默认全部启用。如果后续有工具状态变更，系统会另行通知。\n"
+        )
+
+        # Detect tool state change
+        current_enabled = frozenset(enabled_names) if enabled_names is not None else frozenset(all_names)
+        user_id = state.get("user_id", "__global__")
+        last_state = self._user_last_tool_state.get(user_id)
+
+        tool_status_prompt = ""
+        if last_state is not None and current_enabled != last_state:
+            all_names_set = set(all_names)
+            enabled_set = set(current_enabled)
+            disabled_names_set = all_names_set - enabled_set
+            tool_status_prompt = (
+                "【工具可用情况更新】\n"
+                f"已启用的工具：{', '.join(sorted(enabled_set & all_names_set)) if (enabled_set & all_names_set) else '无'}\n"
+                f"已禁用的工具：{', '.join(sorted(disabled_names_set)) if disabled_names_set else '无'}\n"
+                "请注意：被禁用的工具在本次对话中不可使用。如果用户的请求需要被禁用的工具，"
+                "请礼貌地告知用户需要先启用对应的工具。\n"
+            )
+        elif last_state is None and enabled_names is not None:
+            all_names_set = set(all_names)
+            enabled_set = set(current_enabled)
+            disabled_names_set = all_names_set - enabled_set
+            if disabled_names_set:
+                tool_status_prompt = (
+                    "【工具可用情况更新】\n"
+                    f"已启用的工具：{', '.join(sorted(enabled_set & all_names_set)) if (enabled_set & all_names_set) else '无'}\n"
+                    f"已禁用的工具：{', '.join(sorted(disabled_names_set))}\n"
+                    "请注意：被禁用的工具在本次对话中不可使用。如果用户的请求需要被禁用的工具，"
+                    "请礼貌地告知用户需要先启用对应的工具。\n"
+                )
+
+        # Update cache
+        self._user_last_tool_state[user_id] = current_enabled
+
+        history_messages = list(state["messages"])
+
+        # System trigger (external scheduler) — special logic
+        if state.get("trigger_source") == "system":
+            summary_prompt = "【系统指令】：请对该用户之前的对话进行核心诉求总结，供管理员参考。"
+            input_messages = [SystemMessage(content=base_prompt), SystemMessage(content=summary_prompt)] + history_messages
+            response = await llm.ainvoke(input_messages)
+            print(f"\n>>> [外部定时任务执行中] 用户 {state.get('user_id', 'Unknown')} 总结结果:")
+            print(f">>> {response.content}")
+            return {}
+
+        # Normal user conversation
+        if tool_status_prompt and len(history_messages) >= 1:
+            last_msg = history_messages[-1]
+            augmented_content = f"[系统通知] {tool_status_prompt}\n\n---\n{last_msg.content}"
+            augmented_msg = HumanMessage(content=augmented_content)
+            input_messages = (
+                [SystemMessage(content=base_prompt)]
+                + history_messages[:-1]
+                + [augmented_msg]
+            )
+        else:
+            input_messages = [SystemMessage(content=base_prompt)] + history_messages
+
+        response = await llm.ainvoke(input_messages)
+        return {"messages": [response]}
+
+    # ------------------------------------------------------------------
+    # Public interface: tools info
+    # ------------------------------------------------------------------
+    def get_tools_info(self) -> list[dict]:
+        """Return serializable tool metadata list."""
+        return [{"name": t.name, "description": t.description or ""} for t in self._mcp_tools]
+
+    # ------------------------------------------------------------------
+    # Public interface: task management
+    # ------------------------------------------------------------------
+    async def cancel_task(self, user_id: str):
+        """Cancel the active streaming task for a user."""
+        async with self._task_lock:
+            task = self._active_tasks.get(user_id)
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                    pass
+            self._active_tasks.pop(user_id, None)
+
+    def register_task(self, user_id: str, task: asyncio.Task):
+        """Register an active streaming task for a user."""
+        self._active_tasks[user_id] = task
+
+    def unregister_task(self, user_id: str):
+        """Remove a finished task from the registry."""
+        self._active_tasks.pop(user_id, None)
