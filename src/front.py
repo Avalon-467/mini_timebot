@@ -57,10 +57,10 @@ HTML_TEMPLATE = """
         /* === PWA Standalone Mode Fix === */
         :root {
             --app-height: 100vh;
+            --header-height: 60px;
+            --input-height: 70px;
             --safe-top: env(safe-area-inset-top, 0px);
             --safe-bottom: env(safe-area-inset-bottom, 0px);
-            --safe-left: env(safe-area-inset-left, 0px);
-            --safe-right: env(safe-area-inset-right, 0px);
         }
         
         /* PWA standalone mode: use dynamic viewport height */
@@ -116,8 +116,8 @@ HTML_TEMPLATE = """
         @keyframes slideDown { from { transform: translateY(-100%); } to { transform: translateY(0); } }
 
         /* Fixed header and footer heights */
-        header { flex-shrink: 0; min-height: 60px; }
-        .p-2.sm\:p-4.border-t { flex-shrink: 0; min-height: 70px; }
+        header { flex-shrink: 0; height: var(--header-height, 60px); min-height: var(--header-height, 60px); }
+        .p-2.sm\:p-4.border-t { flex-shrink: 0; height: var(--input-height, 70px); min-height: var(--input-height, 70px); }
 
         .chat-container { flex: 1; min-height: 0; overflow-y: auto; }
         .markdown-body pre { background: #1e1e1e; padding: 1rem; border-radius: 0.5rem; margin: 0.5rem 0; overflow-x: auto; }
@@ -175,12 +175,22 @@ HTML_TEMPLATE = """
         @media (max-width: 768px) {
             .main-layout { flex-direction: column; height: var(--app-height, 100vh); overflow: hidden; }
             .chat-main { max-width: 100%; width: 100%; height: var(--app-height, 100vh); }
-            /* Header: fixed at top */
-            header { flex-shrink: 0; position: relative; min-height: 60px; height: auto; }
+            /* Header: fixed at top - MUST have explicit height */
+            header { 
+                flex-shrink: 0; 
+                height: var(--header-height, 60px); 
+                min-height: var(--header-height, 60px);
+                overflow: hidden;
+            }
             /* Chat container: scrollable middle area */
             .chat-container { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-            /* Input area: fixed at bottom */
-            .p-2.sm\:p-4.border-t { flex-shrink: 0; }
+            /* Input area: fixed at bottom - MUST have explicit height */
+            .p-2.sm\:p-4.border-t { 
+                flex-shrink: 0; 
+                height: var(--input-height, 70px); 
+                min-height: var(--input-height, 70px);
+                overflow: hidden;
+            }
             /* OASIS: overlay mode on mobile */
             .oasis-divider { display: none !important; }
             .oasis-panel {
@@ -201,8 +211,6 @@ HTML_TEMPLATE = """
             /* Reduce padding on mobile */
             #chat-box { padding: 12px !important; }
             .message-agent, .message-user { max-width: 92% !important; }
-            /* Input area: fixed at bottom via flex-shrink:0 */
-            .p-2.sm\:p-4.border-t { flex-shrink: 0 !important; min-height: 70px; }
             /* Increase font size on mobile */
             .message-content, .message-agent, .message-user { font-size: 16px !important; }
             .message-content p, .message-content li { font-size: 16px !important; }
@@ -1219,35 +1227,110 @@ HTML_TEMPLATE = """
         });
     }
 
-    // 9. Keyboard handling for mobile/PWA - simplified with fixed header/footer layout
+    // 9. Keyboard handling for mobile/PWA - comprehensive solution
     if (isTouchDevice && window.visualViewport) {
         const chatMain = document.querySelector('.chat-main');
         const chatContainer = document.querySelector('.chat-container');
+        const header = document.querySelector('header');
+        const inputArea = document.querySelector('.p-2.sm\\:p-4.border-t');
         
         // PWA Standalone mode detection
         const isPWA = window.matchMedia('(display-mode: standalone)').matches || 
                       window.navigator.standalone === true;
         
+        let lastHeight = window.visualViewport.height;
+        
         function handleViewportChange() {
             const vh = window.visualViewport.height;
             const windowHeight = window.innerHeight;
+            const keyboardHeight = windowHeight - vh;
             
-            // For PWA standalone: always use visualViewport height
-            // For browser: only adjust when keyboard is open (viewport significantly smaller)
-            if (isPWA || vh < windowHeight * 0.85) {
-                document.documentElement.style.setProperty('--app-height', vh + 'px');
-                if (chatMain) chatMain.style.height = vh + 'px';
+            // Detect if keyboard is open (more than 100px difference)
+            const keyboardOpen = keyboardHeight > 100;
+            
+            if (isPWA || keyboardOpen) {
+                // PWA mode or keyboard open: adjust all heights
+                const availableHeight = vh;
+                
+                // Update CSS variable
+                document.documentElement.style.setProperty('--app-height', availableHeight + 'px');
+                
+                // Ensure header and input keep their heights
+                const headerHeight = 60;
+                const inputHeight = 70;
+                
+                if (header) {
+                    header.style.height = headerHeight + 'px';
+                    header.style.minHeight = headerHeight + 'px';
+                    header.style.flexShrink = '0';
+                }
+                
+                if (inputArea) {
+                    inputArea.style.height = inputHeight + 'px';
+                    inputArea.style.minHeight = inputHeight + 'px';
+                    inputArea.style.flexShrink = '0';
+                }
+                
+                // Chat main takes full available height
+                if (chatMain) {
+                    chatMain.style.height = availableHeight + 'px';
+                    chatMain.style.maxHeight = availableHeight + 'px';
+                }
+                
+                // Chat container gets remaining space
+                if (chatContainer) {
+                    const containerHeight = availableHeight - headerHeight - inputHeight;
+                    chatContainer.style.height = Math.max(containerHeight, 100) + 'px';
+                    chatContainer.style.minHeight = '0';
+                    chatContainer.style.flex = '1';
+                }
             } else {
+                // Normal mode: reset to CSS defaults
                 document.documentElement.style.removeProperty('--app-height');
-                if (chatMain) chatMain.style.height = '';
+                
+                if (header) {
+                    header.style.height = '';
+                    header.style.minHeight = '';
+                }
+                
+                if (inputArea) {
+                    inputArea.style.height = '';
+                    inputArea.style.minHeight = '';
+                }
+                
+                if (chatMain) {
+                    chatMain.style.height = '';
+                    chatMain.style.maxHeight = '';
+                }
+                
+                if (chatContainer) {
+                    chatContainer.style.height = '';
+                    chatContainer.style.minHeight = '';
+                }
             }
+            
+            lastHeight = vh;
+        }
+        
+        // Debounced resize handler
+        let resizeTimeout;
+        function debouncedHandleViewportChange() {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(handleViewportChange, 50);
         }
         
         // Initial call
         handleViewportChange();
         
-        window.visualViewport.addEventListener('resize', handleViewportChange);
+        // Listen for viewport changes
+        window.visualViewport.addEventListener('resize', debouncedHandleViewportChange);
         window.visualViewport.addEventListener('scroll', handleViewportChange);
+        
+        // Also listen for window resize (orientation change)
+        window.addEventListener('resize', debouncedHandleViewportChange);
+        window.addEventListener('orientationchange', () => {
+            setTimeout(handleViewportChange, 100);
+        });
     }
     
     // Input focus: scroll into view on mobile
@@ -1255,8 +1338,22 @@ HTML_TEMPLATE = """
     if (inputEl && isTouchDevice) {
         inputEl.addEventListener('focus', () => {
             setTimeout(() => {
-                inputEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }, 300);
+                // Scroll input into view
+                inputEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                // Also trigger viewport check
+                if (window.visualViewport) {
+                    window.dispatchEvent(new Event('resize'));
+                }
+            }, 100);
+        });
+        
+        // On blur: reset after keyboard closes
+        inputEl.addEventListener('blur', () => {
+            setTimeout(() => {
+                if (window.visualViewport) {
+                    window.dispatchEvent(new Event('resize'));
+                }
+            }, 200);
         });
     }
     </script>
