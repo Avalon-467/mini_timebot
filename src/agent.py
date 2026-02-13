@@ -315,7 +315,10 @@ class MiniTimeAgent:
 
         history_messages = list(state["messages"])
 
-        # 如果是系统触发，且最后一条是 HumanMessage（首轮），给它加上系统触发说明
+        # 每次进入前清理：移除末尾不完整的 tool_calls（有 AIMessage 带 tool_calls 但缺少 ToolMessage 回复）
+        history_messages = self._sanitize_messages(history_messages)
+
+        # 如果是系统触发，且最后一条不是 ToolMessage（非工具回调轮），给它加上系统触发说明
         is_system = state.get("trigger_source") == "system"
         if is_system and history_messages and isinstance(history_messages[-1], HumanMessage):
             original_text = history_messages[-1].content
