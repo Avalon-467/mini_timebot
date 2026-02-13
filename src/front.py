@@ -78,11 +78,7 @@ HTML_TEMPLATE = """
                 user-select: text;
             }
         }
-        /* Safe area insets for notched devices */
-        .safe-top { padding-top: env(safe-area-inset-top); }
-        .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
-        .safe-left { padding-left: env(safe-area-inset-left); }
-        .safe-right { padding-right: env(safe-area-inset-right); }
+        /* Safe area classes removed — no special notch/curved-screen handling */
         /* Splash screen */
         #app-splash {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -100,7 +96,7 @@ HTML_TEMPLATE = """
             display: none; position: fixed; top: 0; left: 0; right: 0;
             background: #ef4444; color: white; text-align: center;
             padding: 6px 0; font-size: 13px; font-weight: 600; z-index: 99998;
-            padding-top: calc(6px + env(safe-area-inset-top));
+            padding-top: 6px;
         }
         #offline-banner.show { display: block; animation: slideDown 0.3s ease; }
         @keyframes slideDown { from { transform: translateY(-100%); } to { transform: translateY(0); } }
@@ -162,16 +158,27 @@ HTML_TEMPLATE = """
             .main-layout { flex-direction: column; }
             .chat-main { max-width: 100%; width: 100%; height: 100vh; }
             .chat-container { height: auto !important; flex: 1; min-height: 0; }
-            /* Hide OASIS on mobile by default */
-            .oasis-panel { display: none !important; }
+            /* OASIS: overlay mode on mobile */
             .oasis-divider { display: none !important; }
-            /* Header: stack items vertically on narrow screens */
+            .oasis-panel {
+                position: fixed !important; top: 0; left: 0; right: 0; bottom: 0;
+                width: 100% !important; min-width: 100% !important;
+                z-index: 50; display: none;
+            }
+            .oasis-panel.mobile-open { display: flex !important; }
+            .oasis-panel.collapsed-panel { display: none !important; }
+            .oasis-panel .oasis-expand-btn { display: none !important; }
+            /* Mobile OASIS open button in header */
+            .mobile-oasis-btn { display: inline-flex !important; }
+            /* Header: stack items on narrow screens */
             .mobile-header-top { flex-wrap: wrap; gap: 6px; }
             .mobile-header-actions { flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
             /* Reduce padding on mobile */
             #chat-box { padding: 12px !important; }
             .message-agent, .message-user { max-width: 92% !important; }
         }
+        /* Hide mobile-only elements on desktop */
+        .mobile-oasis-btn { display: none !important; }
         .oasis-divider { width: 1px; background: #e5e7eb; cursor: col-resize; flex-shrink: 0; }
         .oasis-divider:hover { background: #3b82f6; width: 3px; }
     </style>
@@ -230,6 +237,7 @@ HTML_TEMPLATE = """
                     <div id="uid-display" class="text-xs sm:text-sm font-mono bg-gray-100 px-2 sm:px-3 py-1 rounded border truncate max-w-[80px] sm:max-w-none"></div>
                     <div id="session-display" class="text-[10px] sm:text-xs font-mono bg-blue-50 text-blue-600 px-1.5 sm:px-2 py-1 rounded border border-blue-200 cursor-default" title="当前对话号"></div>
                     <button onclick="handleNewSession()" class="text-[10px] sm:text-xs bg-green-50 text-green-600 hover:bg-green-100 px-1.5 sm:px-2 py-1 rounded border border-green-200 transition-colors" title="开启新对话">+新</button>
+                    <button onclick="toggleOasisMobile()" class="mobile-oasis-btn text-[10px] bg-purple-50 text-purple-600 hover:bg-purple-100 px-1.5 py-1 rounded border border-purple-200 transition-colors" title="OASIS讨论">🏛️</button>
                     <button onclick="handleLogout()" class="text-[10px] sm:text-xs text-gray-400 hover:text-red-500 px-1.5 sm:px-2 py-1 rounded transition-colors" title="切换用户">退出</button>
                 </div>
             </header>
@@ -793,10 +801,24 @@ HTML_TEMPLATE = """
             oasisPanelOpen = !oasisPanelOpen;
             if (oasisPanelOpen) {
                 panel.classList.remove('collapsed-panel');
+                panel.classList.remove('mobile-open');
                 refreshOasisTopics();
             } else {
                 panel.classList.add('collapsed-panel');
+                panel.classList.remove('mobile-open');
                 stopOasisPolling();
+            }
+        }
+
+        function toggleOasisMobile() {
+            const panel = document.getElementById('oasis-panel');
+            if (panel.classList.contains('mobile-open')) {
+                panel.classList.remove('mobile-open');
+                stopOasisPolling();
+            } else {
+                panel.classList.remove('collapsed-panel');
+                panel.classList.add('mobile-open');
+                refreshOasisTopics();
             }
         }
 
