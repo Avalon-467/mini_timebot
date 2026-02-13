@@ -101,6 +101,10 @@ HTML_TEMPLATE = """
         #offline-banner.show { display: block; animation: slideDown 0.3s ease; }
         @keyframes slideDown { from { transform: translateY(-100%); } to { transform: translateY(0); } }
 
+        /* Fixed header and footer heights */
+        header { flex-shrink: 0; min-height: 60px; }
+        .p-2.sm\:p-4.border-t { flex-shrink: 0; min-height: 70px; }
+
         .chat-container { flex: 1; min-height: 0; overflow-y: auto; }
         .markdown-body pre { background: #1e1e1e; padding: 1rem; border-radius: 0.5rem; margin: 0.5rem 0; overflow-x: auto; }
         .markdown-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.9em; }
@@ -158,7 +162,7 @@ HTML_TEMPLATE = """
             .main-layout { flex-direction: column; height: 100vh; overflow: hidden; }
             .chat-main { max-width: 100%; width: 100%; height: 100vh; }
             /* Header: fixed at top */
-            header { flex-shrink: 0; position: relative; }
+            header { flex-shrink: 0; position: relative; min-height: 60px; height: auto; }
             /* Chat container: scrollable middle area */
             .chat-container { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
             /* Input area: fixed at bottom */
@@ -184,7 +188,7 @@ HTML_TEMPLATE = """
             #chat-box { padding: 12px !important; }
             .message-agent, .message-user { max-width: 92% !important; }
             /* Input area: fixed at bottom via flex-shrink:0 */
-            .p-2.sm\:p-4.border-t { flex-shrink: 0 !important; }
+            .p-2.sm\:p-4.border-t { flex-shrink: 0 !important; min-height: 70px; }
             /* Increase font size on mobile */
             .message-content, .message-agent, .message-user { font-size: 16px !important; }
             .message-content p, .message-content li { font-size: 16px !important; }
