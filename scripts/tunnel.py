@@ -4,7 +4,8 @@
 Cloudflare Tunnel 公网部署脚本
 - 自动检测平台（Linux/macOS + amd64/arm64）
 - 自动下载 cloudflared 到 bin/ 目录
-- 启动隧道并打印公网地址
+- 启动两条隧道：前端 Web UI + Bark 推送服务
+- 打印各自的公网地址
 """
 
 import os
@@ -34,9 +35,14 @@ ENV_PATH = os.path.join(PROJECT_ROOT, "config", ".env")
 # ── 加载配置 ──────────────────────────────────────────────
 load_dotenv(dotenv_path=os.path.join(PROJECT_ROOT, "config", ".env"))
 PORT_FRONTEND = os.getenv("PORT_FRONTEND", "51209")
+PORT_BARK = os.getenv("PORT_BARK", "58010")
 
 # ── 全局进程引用 ──────────────────────────────────────────
-tunnel_proc = None
+tunnel_procs = []
+tunnel_urls = {}  # {"frontend": "https://...", "bark": "https://..."}
+urls_lock = threading.Lock()
+all_tunnels_ready = threading.Event()
+expected_tunnels = 2
 
 
 def detect_platform():
@@ -117,114 +123,158 @@ def ensure_cloudflared():
 
 
 def cleanup(signum=None, frame=None):
-    """清理隧道进程"""
-    global tunnel_proc
-    if tunnel_proc and tunnel_proc.poll() is None:
-        print("\n🛑 正在关闭 Cloudflare Tunnel...")
-        tunnel_proc.terminate()
-        try:
-            tunnel_proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            tunnel_proc.kill()
-        print("✅ 隧道已关闭")
+    """清理所有隧道进程"""
+    for proc in tunnel_procs:
+        if proc and proc.poll() is None:
+            print(f"🛑 正在关闭隧道进程 (PID: {proc.pid})...")
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+    if tunnel_procs:
+        print("✅ 所有隧道已关闭")
     if signum is not None:
         sys.exit(0)
 
 
-def write_domain_to_env(domain: str):
-    """Write/update PUBLIC_DOMAIN and BARK_PUBLIC_URL in config/.env"""
+def write_env_key(key: str, value: str):
+    """Write or update a single key in config/.env"""
     env_file = ENV_PATH
 
-    # Read existing content
     if os.path.exists(env_file):
         with open(env_file, "r", encoding="utf-8") as f:
             lines = f.readlines()
     else:
         lines = []
 
-    # Update or append PUBLIC_DOMAIN and BARK_PUBLIC_URL
-    keys_to_write = {
-        "PUBLIC_DOMAIN": domain,
-        "BARK_PUBLIC_URL": domain,
-    }
-    keys_found = set()
-
+    key_found = False
     new_lines = []
     for line in lines:
         stripped = line.strip()
-        replaced = False
-        for key, value in keys_to_write.items():
-            if stripped.startswith(f"{key}=") or stripped.startswith(f"# {key}="):
-                new_lines.append(f"{key}={value}\n")
-                keys_found.add(key)
-                replaced = True
-                break
-        if not replaced:
+        if stripped.startswith(f"{key}=") or stripped.startswith(f"# {key}="):
+            new_lines.append(f"{key}={value}\n")
+            key_found = True
+        else:
             new_lines.append(line)
 
-    # Append any keys that weren't found
-    missing_keys = set(keys_to_write.keys()) - keys_found
-    if missing_keys:
+    if not key_found:
         if new_lines and not new_lines[-1].endswith("\n"):
             new_lines.append("\n")
-        new_lines.append("\n# Cloudflare Tunnel public domain (auto-generated)\n")
-        for key in sorted(missing_keys):
-            new_lines.append(f"{key}={keys_to_write[key]}\n")
+        new_lines.append(f"{key}={value}\n")
 
     with open(env_file, "w", encoding="utf-8") as f:
         f.writelines(new_lines)
 
-    print(f"📝 已将公网域名写入 {env_file}")
+
+def write_domains_to_env():
+    """Write all captured tunnel URLs to config/.env"""
+    with urls_lock:
+        if "frontend" in tunnel_urls:
+            write_env_key("PUBLIC_DOMAIN", tunnel_urls["frontend"])
+        if "bark" in tunnel_urls:
+            write_env_key("BARK_PUBLIC_URL", tunnel_urls["bark"])
+    print(f"📝 已将公网域名写入 {ENV_PATH}")
 
 
-def start_tunnel():
-    """启动 Cloudflare Tunnel 并解析公网地址"""
-    global tunnel_proc
+def run_tunnel(cf_bin: str, name: str, local_port: str, env_key: str):
+    """
+    Start a single cloudflared tunnel in a thread.
+    Captures the public URL and stores it in tunnel_urls.
+    """
+    print(f"🌐 [{name}] 正在启动隧道 (转发 → 127.0.0.1:{local_port})...")
 
-    cf_bin = ensure_cloudflared()
-
-    print(f"\n🌐 正在启动 Cloudflare Tunnel (转发 → 127.0.0.1:{PORT_FRONTEND})...")
-
-    # 注册信号处理
-    signal.signal(signal.SIGINT, cleanup)
-    signal.signal(signal.SIGTERM, cleanup)
-
-    tunnel_proc = subprocess.Popen(
-        [cf_bin, "tunnel", "--url", f"http://127.0.0.1:{PORT_FRONTEND}"],
+    proc = subprocess.Popen(
+        [cf_bin, "tunnel", "--url", f"http://127.0.0.1:{local_port}"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
     )
+    tunnel_procs.append(proc)
 
-    # 解析输出，提取公网地址
-    public_url = None
     url_pattern = re.compile(r"(https://[a-zA-Z0-9-]+\.trycloudflare\.com)")
+    public_url = None
 
     try:
-        for line in tunnel_proc.stdout:
+        for line in proc.stdout:
             line = line.strip()
             if not public_url:
                 match = url_pattern.search(line)
                 if match:
                     public_url = match.group(1)
+                    with urls_lock:
+                        tunnel_urls[name] = public_url
 
-                    # Write domain to .env for other services to read
-                    write_domain_to_env(public_url)
+                    print(f"  ✅ [{name}] 公网地址: {public_url}")
 
-                    print()
-                    print("============================================")
-                    print("  🎉 公网部署成功！")
-                    print(f"  🌍 公网地址: {public_url}")
-                    print("  按 Ctrl+C 关闭隧道")
-                    print("============================================")
-                    print()
+                    # Check if all tunnels are ready
+                    with urls_lock:
+                        if len(tunnel_urls) >= expected_tunnels:
+                            all_tunnels_ready.set()
 
-        # stdout 结束意味着进程退出
-        tunnel_proc.wait()
-        if tunnel_proc.returncode != 0 and not public_url:
-            print("❌ Cloudflare Tunnel 启动失败")
-            sys.exit(1)
+        # stdout closed => process exited
+        proc.wait()
+    except Exception as e:
+        print(f"  ❌ [{name}] 隧道异常: {e}")
 
+
+def start_tunnels():
+    """启动所有 Cloudflare Tunnel 并等待公网地址就绪"""
+    cf_bin = ensure_cloudflared()
+
+    # 注册信号处理
+    signal.signal(signal.SIGINT, cleanup)
+    signal.signal(signal.SIGTERM, cleanup)
+
+    # Define tunnels: (name, local_port, env_key)
+    tunnel_configs = [
+        ("frontend", PORT_FRONTEND, "PUBLIC_DOMAIN"),
+        ("bark", PORT_BARK, "BARK_PUBLIC_URL"),
+    ]
+
+    # Start each tunnel in a background thread
+    threads = []
+    for name, port, env_key in tunnel_configs:
+        t = threading.Thread(target=run_tunnel, args=(cf_bin, name, port, env_key), daemon=True)
+        t.start()
+        threads.append(t)
+
+    # Wait for all tunnels to report their URLs (timeout 60s)
+    print("\n⏳ 等待所有隧道就绪...")
+    ready = all_tunnels_ready.wait(timeout=60)
+
+    if ready:
+        # Write all URLs to .env
+        write_domains_to_env()
+
+        print()
+        print("============================================")
+        print("  🎉 公网部署成功！")
+        with urls_lock:
+            if "frontend" in tunnel_urls:
+                print(f"  🌍 前端地址: {tunnel_urls['frontend']}")
+            if "bark" in tunnel_urls:
+                print(f"  📱 Bark 推送地址: {tunnel_urls['bark']}")
+                print(f"     (请在 Bark App 中设置此地址作为 Server URL)")
+        print("  按 Ctrl+C 关闭所有隧道")
+        print("============================================")
+        print()
+    else:
+        print("⚠️  部分隧道未能在 60 秒内就绪")
+        with urls_lock:
+            if tunnel_urls:
+                write_domains_to_env()
+                for name, url in tunnel_urls.items():
+                    print(f"  ✅ [{name}] {url}")
+            else:
+                print("❌ 所有隧道均启动失败")
+                cleanup()
+                sys.exit(1)
+
+    # Keep main thread alive, waiting for tunnel threads
+    try:
+        for t in threads:
+            t.join()
     except KeyboardInterrupt:
         pass
     finally:
@@ -232,4 +282,4 @@ def start_tunnel():
 
 
 if __name__ == "__main__":
-    start_tunnel()
+    start_tunnels()
