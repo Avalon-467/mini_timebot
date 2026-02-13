@@ -101,7 +101,7 @@ HTML_TEMPLATE = """
         #offline-banner.show { display: block; animation: slideDown 0.3s ease; }
         @keyframes slideDown { from { transform: translateY(-100%); } to { transform: translateY(0); } }
 
-        .chat-container { height: calc(100vh - 180px); }
+        .chat-container { flex: 1; min-height: 0; overflow-y: auto; }
         .markdown-body pre { background: #1e1e1e; padding: 1rem; border-radius: 0.5rem; margin: 0.5rem 0; overflow-x: auto; }
         .markdown-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.9em; }
         .message-user { border-radius: 1.25rem 1.25rem 0.2rem 1.25rem; }
@@ -150,14 +150,19 @@ HTML_TEMPLATE = """
         .expert-default { background: linear-gradient(135deg, #6b7280, #4b5563); }
         .oasis-discussion-box { height: calc(100vh - 340px); overflow-y: auto; }
         .oasis-conclusion-box { background: linear-gradient(135deg, #f0fdf4, #ecfdf5); border: 1px solid #86efac; border-radius: 12px; padding: 12px; }
-        .main-layout { display: flex; height: 100vh; max-width: 100%; }
-        .chat-main { flex: 1; min-width: 0; max-width: 900px; display: flex; flex-direction: column; }
+        .main-layout { display: flex; height: 100vh; max-width: 100%; overflow: hidden; }
+        .chat-main { flex: 1; min-width: 0; max-width: 900px; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
         /* === Mobile responsive === */
         @media (max-width: 768px) {
-            .main-layout { flex-direction: column; }
-            .chat-main { max-width: 100%; width: 100%; height: 100%; }
-            .chat-container { height: auto !important; flex: 1; min-height: 0; overflow-y: auto; }
+            .main-layout { flex-direction: column; height: 100vh; overflow: hidden; }
+            .chat-main { max-width: 100%; width: 100%; height: 100vh; }
+            /* Header: fixed at top */
+            header { flex-shrink: 0; position: relative; }
+            /* Chat container: scrollable middle area */
+            .chat-container { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+            /* Input area: fixed at bottom */
+            .p-2.sm\:p-4.border-t { flex-shrink: 0; }
             /* OASIS: overlay mode on mobile */
             .oasis-divider { display: none !important; }
             .oasis-panel {
@@ -178,13 +183,8 @@ HTML_TEMPLATE = """
             /* Reduce padding on mobile */
             #chat-box { padding: 12px !important; }
             .message-agent, .message-user { max-width: 92% !important; }
-            /* Ensure input area stays visible */
-            .p-2.sm\:p-4.border-t { 
-                flex-shrink: 0 !important; 
-                min-height: fit-content !important;
-                position: relative !important;
-                z-index: 5 !important;
-            }
+            /* Input area: fixed at bottom via flex-shrink:0 */
+            .p-2.sm\:p-4.border-t { flex-shrink: 0 !important; }
             /* Increase font size on mobile */
             .message-content, .message-agent, .message-user { font-size: 16px !important; }
             .message-content p, .message-content li { font-size: 16px !important; }
@@ -257,7 +257,7 @@ HTML_TEMPLATE = """
 
         <!-- ===== 左侧：聊天区 ===== -->
         <div class="chat-main h-screen flex flex-col bg-white border-x border-gray-200 shadow-2xl">
-            <header class="p-3 sm:p-4 border-b bg-white flex justify-between items-start sm:items-center sticky top-0 z-10 gap-2">
+            <header class="p-3 sm:p-4 border-b bg-white flex justify-between items-start sm:items-center gap-2 flex-shrink-0">
                 <div class="flex items-center space-x-2 sm:space-x-3 mobile-header-top flex-shrink-0">
                     <div class="bg-blue-600 p-1.5 sm:p-2 rounded-lg text-white font-bold text-lg sm:text-xl">X</div>
                     <div>
@@ -1201,61 +1201,35 @@ HTML_TEMPLATE = """
         });
     }
 
-    // 9. Keyboard handling for mobile/PWA using visualViewport
+    // 9. Keyboard handling for mobile/PWA - simplified with fixed header/footer layout
     if (isTouchDevice && window.visualViewport) {
         const chatMain = document.querySelector('.chat-main');
-        const inputWrapper = document.querySelector('.p-2.sm\\:p-4.border-t');
+        const chatContainer = document.querySelector('.chat-container');
         
-        let pendingUpdate = null;
-        function updateLayout() {
-            const viewportHeight = window.visualViewport.height;
-            const keyboardHeight = window.innerHeight - viewportHeight;
-            
-            if (keyboardHeight > 50) {
-                // Keyboard is open
-                document.body.style.height = viewportHeight + 'px';
-                if (chatMain) chatMain.style.height = viewportHeight + 'px';
-                // Scroll input into view
-                if (inputWrapper) {
-                    inputWrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                }
+        function handleViewportChange() {
+            const vh = window.visualViewport.height;
+            // Only adjust if keyboard is likely open (viewport significantly smaller)
+            if (vh < window.innerHeight * 0.85) {
+                document.documentElement.style.setProperty('--viewport-height', vh + 'px');
+                if (chatMain) chatMain.style.height = vh + 'px';
             } else {
-                // Keyboard is closed
-                document.body.style.height = '100vh';
-                if (chatMain) chatMain.style.height = '100%';
+                document.documentElement.style.removeProperty('--viewport-height');
+                if (chatMain) chatMain.style.height = '100vh';
             }
         }
         
-        window.visualViewport.addEventListener('resize', () => {
-            if (pendingUpdate) cancelAnimationFrame(pendingUpdate);
-            pendingUpdate = requestAnimationFrame(updateLayout);
-        });
-        window.visualViewport.addEventListener('scroll', updateLayout);
-        
-        // Initial setup
-        updateLayout();
+        window.visualViewport.addEventListener('resize', handleViewportChange);
+        window.visualViewport.addEventListener('scroll', handleViewportChange);
     }
     
-    // Fallback for older iOS
-    if (isTouchDevice) {
-        const inputEl = document.getElementById('user-input');
-        if (inputEl) {
-            inputEl.addEventListener('focus', () => {
-                setTimeout(() => {
-                    // For PWA standalone mode
-                    if (window.visualViewport) {
-                        document.body.style.height = window.visualViewport.height + 'px';
-                    }
-                }, 100);
-            });
-            inputEl.addEventListener('blur', () => {
-                setTimeout(() => {
-                    if (window.visualViewport) {
-                        document.body.style.height = '100vh';
-                    }
-                }, 100);
-            });
-        }
+    // Input focus: scroll into view on mobile
+    const inputEl = document.getElementById('user-input');
+    if (inputEl && isTouchDevice) {
+        inputEl.addEventListener('focus', () => {
+            setTimeout(() => {
+                inputEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 300);
+        });
     }
     </script>
 </body>
