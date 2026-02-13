@@ -294,12 +294,20 @@ class MiniTimeAgent:
 
         # System trigger (external scheduler) — special logic
         if state.get("trigger_source") == "system":
-            summary_prompt = "【系统指令】：请对该用户之前的对话进行核心诉求总结，供管理员参考。"
-            input_messages = [SystemMessage(content=base_prompt), SystemMessage(content=summary_prompt)] + history_messages
+            # 根据触发内容决定处理方式
+            user_text = history_messages[-1].content if history_messages else ""
+            if "执行指令: summary" in user_text.lower():
+                # summary 任务：总结用户对话
+                summary_prompt = "【系统指令】：请对该用户之前的对话进行核心诉求总结，供管理员参考。"
+                input_messages = [SystemMessage(content=base_prompt), SystemMessage(content=summary_prompt)] + history_messages[:-1]
+            else:
+                # 普通闹钟触发：响应用户的指令
+                input_messages = [SystemMessage(content=base_prompt)] + history_messages
+            
             response = await llm.ainvoke(input_messages)
-            print(f"\n>>> [外部定时任务执行中] 用户 {state.get('user_id', 'Unknown')} 总结结果:")
+            print(f"\n>>> [外部定时任务执行] 用户 {state.get('user_id', 'Unknown')}:")
             print(f">>> {response.content}")
-            return {}
+            return {"messages": [response]}
 
         # Normal user conversation
         if tool_status_prompt and len(history_messages) >= 1:
