@@ -151,7 +151,8 @@ async def get_public_url(username: str) -> str:
         lines.append("  ⚪ 用户级地址: 未配置")
 
     if env_url:
-        lines.append(f"  {'⚪' if user_url else '✅'} 全局地址（.env）: {env_url}")
+        env_icon = "⚪" if user_url else "✅"
+        lines.append(f"  {env_icon} 全局地址（.env）: {env_url}")
     else:
         lines.append("  ⚠️ 全局地址（.env）: 未配置")
 

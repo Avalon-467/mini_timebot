@@ -26,6 +26,7 @@ USER_INJECTED_TOOLS = {
     "add_alarm", "list_alarms", "delete_alarm",
     # Bark push notification tools
     "set_push_key", "send_push_notification", "get_push_status",
+    "set_public_url", "get_public_url", "clear_public_url",
 }
 
 
@@ -254,6 +255,9 @@ class MiniTimeAgent:
             "   - set_push_key：保存用户的 Bark Key（用户首次配置推送时使用）\n"
             "   - send_push_notification：发送推送通知到用户手机\n"
             "   - get_push_status：查看推送配置状态\n"
+            "   - set_public_url：设置用户级公网地址（推送点击后跳转用）\n"
+            "   - get_public_url：查看当前公网地址配置\n"
+            "   - clear_public_url：清除用户级公网地址配置\n"
             "   调用推送工具时，username 参数由系统自动注入，你不需要也不应该提供该参数。\n"
             "   当定时任务触发时，如果用户已配置 Bark Key，可以主动发送推送通知提醒用户。\n"
             "   - run_command：执行 shell 命令（ls、grep、cat、curl 等白名单内的命令）\n"
