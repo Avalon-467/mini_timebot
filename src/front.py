@@ -239,8 +239,8 @@ HTML_TEMPLATE = """
                     <div id="uid-display" class="text-xs sm:text-sm font-mono bg-gray-100 px-2 sm:px-3 py-1 rounded border truncate max-w-[80px] sm:max-w-none"></div>
                     <div id="session-display" class="text-[10px] sm:text-xs font-mono bg-blue-50 text-blue-600 px-1.5 sm:px-2 py-1 rounded border border-blue-200 cursor-default" title="当前对话号"></div>
                     <button onclick="handleNewSession()" class="text-[10px] sm:text-xs bg-green-50 text-green-600 hover:bg-green-100 px-1.5 sm:px-2 py-1 rounded border border-green-200 transition-colors" title="开启新对话">+新</button>
-                    <button onclick="toggleOasisMobile()" class="mobile-oasis-btn text-[10px] bg-purple-50 text-purple-600 hover:bg-purple-100 px-1.5 py-1 rounded border border-purple-200 transition-colors" title="OASIS讨论">🏛️</button>
                     <button onclick="handleLogout()" class="text-[10px] sm:text-xs text-gray-400 hover:text-red-500 px-1.5 sm:px-2 py-1 rounded transition-colors" title="切换用户">退出</button>
+                    <button onclick="toggleOasisMobile()" class="mobile-oasis-btn text-[10px] bg-purple-50 text-purple-600 hover:bg-purple-100 px-1.5 py-1 rounded border border-purple-200 transition-colors" title="OASIS讨论">🏛️</button>
                 </div>
             </header>
 
