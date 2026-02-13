@@ -161,6 +161,11 @@ class MiniTimeAgent:
                 "args": [os.path.join(self._src_dir, "mcp_commander.py")],
                 "transport": "stdio",
             },
+            "oasis_service": {
+                "command": "python",
+                "args": [os.path.join(self._src_dir, "mcp_oasis.py")],
+                "transport": "stdio",
+            },
         })
 
         # 3. Fetch tool definitions (new API: no context manager needed)
@@ -231,6 +236,9 @@ class MiniTimeAgent:
             "调用文件管理工具（list_files, read_file, write_file, append_file, delete_file）时，"
             "username 参数由系统自动注入，你不需要也不应该提供该参数。\n"
             "4. 指令执行：可以在用户的安全沙箱目录中执行系统命令和 Python 代码。\n"
+            "5. OASIS 论坛：当用户的问题需要多角度深入分析时（如策略评估、利弊分析、争议话题等），\n"
+            "   可以使用 post_to_oasis 工具发起多专家讨论，由创意、批判、数据、综合四位专家并行辩论后给出结论。\n"
+            "   使用 check_oasis_discussion 可查看讨论进展，list_oasis_topics 可查看历史讨论。\n"
             "   - run_command：执行 shell 命令（ls、grep、cat、curl 等白名单内的命令）\n"
             "   - run_python_code：执行 Python 代码片段（数据计算、文本处理等）\n"
             "   - list_allowed_commands：查看允许执行的命令白名单\n"

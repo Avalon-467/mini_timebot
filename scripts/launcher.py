@@ -32,6 +32,7 @@ load_dotenv(dotenv_path=os.path.join(PROJECT_ROOT, "config", ".env"))
 PORT_SCHEDULER = os.getenv("PORT_SCHEDULER", "51201")
 PORT_AGENT = os.getenv("PORT_AGENT", "51200")
 PORT_FRONTEND = os.getenv("PORT_FRONTEND", "51209")
+PORT_OASIS = os.getenv("PORT_OASIS", "51202")
 
 # 使用当前 Python 解释器（虚拟环境已由 run.sh/run.bat 激活）
 venv_python = sys.executable
@@ -111,9 +112,10 @@ print()
 
 # 服务配置：(提示信息, 脚本路径, 启动后等待秒数)
 services = [
-    (f"⏰ [1/3] 启动定时调度中心 (port {PORT_SCHEDULER})...", "src/time.py", 2),
-    (f"🤖 [2/3] 启动 AI Agent (port {PORT_AGENT})...", "src/mainagent.py", 3),
-    (f"🌐 [3/3] 启动前端 Web UI (port {PORT_FRONTEND})...", "src/front.py", 1),
+    (f"⏰ [1/4] 启动定时调度中心 (port {PORT_SCHEDULER})...", "src/time.py", 2),
+    (f"🏛️ [2/4] 启动 OASIS 论坛服务 (port {PORT_OASIS})...", "oasis/server.py", 2),
+    (f"🤖 [3/4] 启动 AI Agent (port {PORT_AGENT})...", "src/mainagent.py", 3),
+    (f"🌐 [4/4] 启动前端 Web UI (port {PORT_FRONTEND})...", "src/front.py", 1),
 ]
 
 for msg, script, wait_time in services:
