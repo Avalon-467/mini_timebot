@@ -62,6 +62,7 @@ scheduler = AsyncIOScheduler(job_defaults={
 })
 PORT_AGENT = int(os.getenv("PORT_AGENT", "51200"))
 AGENT_URL = f"http://127.0.0.1:{PORT_AGENT}/system_trigger"
+INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "")
 
 async def trigger_agent(user_id: str, text: str, session_id: str = "default"):
     """到达定时时间，向 Agent 发送 HTTP 请求"""
@@ -71,7 +72,7 @@ async def trigger_agent(user_id: str, text: str, session_id: str = "default"):
                 "user_id": user_id,
                 "text": text,
                 "session_id": session_id,
-            }, timeout=10.0)
+            }, headers={"X-Internal-Token": INTERNAL_TOKEN}, timeout=10.0)
             print(f"[{datetime.now()}] 任务触发：用户={user_id}, session={session_id}, 状态码={resp.status_code}")
         except Exception as e:
             print(f"[{datetime.now()}] 任务触发失败: {e}")

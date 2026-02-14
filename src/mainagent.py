@@ -2,9 +2,10 @@ import os
 import json
 import hashlib
 import asyncio
+import secrets
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
@@ -25,6 +26,37 @@ db_path = os.path.join(root_dir, "data", "agent_memory.db")
 users_path = os.path.join(root_dir, "config", "users.json")
 
 load_dotenv(dotenv_path=env_path)
+
+
+# --- Internal token for service-to-service auth ---
+INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "").strip()
+if not INTERNAL_TOKEN:
+    # Auto-generate a token and append to .env (replacing any empty INTERNAL_TOKEN= line)
+    INTERNAL_TOKEN = secrets.token_hex(32)
+    # Read existing content, replace empty placeholder if present
+    with open(env_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    if "INTERNAL_TOKEN=" in content:
+        # Replace empty or placeholder line with real value
+        import re
+        content = re.sub(
+            r"^INTERNAL_TOKEN=\s*$",
+            f"INTERNAL_TOKEN={INTERNAL_TOKEN}",
+            content,
+            flags=re.MULTILINE,
+        )
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.write(content)
+    else:
+        with open(env_path, "a", encoding="utf-8") as f:
+            f.write(f"\n# 内部服务间通信密钥（自动生成，勿泄露）\nINTERNAL_TOKEN={INTERNAL_TOKEN}\n")
+    print(f"🔑 已自动生成 INTERNAL_TOKEN 并写入 {env_path}")
+
+
+def verify_internal_token(token: str | None):
+    """校验内部服务通信 token，失败抛 403"""
+    if not token or token != INTERNAL_TOKEN:
+        raise HTTPException(status_code=403, detail="无效的内部通信凭证")
 
 
 # --- User auth helpers ---
@@ -49,6 +81,10 @@ def verify_password(username: str, password: str) -> bool:
 # --- Create agent instance ---
 agent = MiniTimeAgent(src_dir=current_dir, db_path=db_path)
 
+# --- Oasis Bridge: 增量历史偏移量 ---
+# session_id -> read offset (for incremental history delivery)
+oasis_session_offsets: dict[str, int] = {}
+
 
 # --- FastAPI lifespan ---
 @asynccontextmanager
@@ -58,7 +94,7 @@ async def lifespan(app: FastAPI):
     await agent.shutdown()
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
 
 # --- Request models ---
@@ -83,12 +119,20 @@ class CancelRequest(BaseModel):
     password: str
     session_id: str = "default"
 
+class OasisAskRequest(BaseModel):
+    """外部 OASIS 论坛调用本 Agent 参与讨论的请求"""
+    session_id: str
+    topic: str = "未知议题"
+    history: list[dict] = []
+    user_id: str = "oasis_external"
+
 
 # --- Routes ---
 
 @app.get("/tools")
-async def get_tools_list():
-    """返回当前 Agent 加载的所有 MCP 工具信息"""
+async def get_tools_list(x_internal_token: str | None = Header(None)):
+    """返回当前 Agent 加载的所有 MCP 工具信息（需要内部 token）"""
+    verify_internal_token(x_internal_token)
     return {"status": "success", "tools": agent.get_tools_info()}
 
 
@@ -224,7 +268,8 @@ async def cancel_agent(req: CancelRequest):
 
 
 @app.post("/system_trigger")
-async def system_trigger(req: SystemTriggerRequest):
+async def system_trigger(req: SystemTriggerRequest, x_internal_token: str | None = Header(None)):
+    verify_internal_token(x_internal_token)
     thread_id = f"{req.user_id}#{req.session_id}"
     config = {"configurable": {"thread_id": thread_id}}
     system_input = {
@@ -237,6 +282,96 @@ async def system_trigger(req: SystemTriggerRequest):
     # fire-and-forget：立刻返回，graph 在后台异步执行
     asyncio.create_task(agent.agent_app.ainvoke(system_input, config))
     return {"status": "received", "message": f"系统触发已收到，用户 {req.user_id}"}
+
+
+# ------------------------------------------------------------------
+# Oasis Bridge: 外部 OASIS 论坛调用 Agent 参与讨论
+# ------------------------------------------------------------------
+
+@app.post("/oasis/ask")
+async def oasis_ask(req: OasisAskRequest, x_internal_token: str | None = Header(None)):
+    """
+    外部 OASIS 论坛调用此接口，邀请本 Agent 参与讨论。
+    需要在请求头中携带 X-Internal-Token 进行鉴权。
+
+    流程:
+    1. 增量提取历史消息（只发送 Agent 还没见过的新内容）
+    2. 格式化为可读文本，构造系统触发消息
+    3. 调用 Agent ainvoke 等待思考完成
+    4. 直接从 Agent 回复中提取内容返回给外部 OASIS
+
+    Payload 示例:
+    {
+        "session_id": "oasis_abc123",
+        "topic": "AI是否应该有情感？",
+        "history": [
+            {"role": "创意专家", "content": "我认为AI应该..."},
+            {"role": "批判专家", "content": "但是风险在于..."}
+        ],
+        "user_id": "oasis_external"
+    }
+    """
+    verify_internal_token(x_internal_token)
+    session_id = req.session_id
+
+    # --- 增量提取：只获取 Agent 没见过的新消息 ---
+    last_idx = oasis_session_offsets.get(session_id, 0)
+    new_messages = req.history[last_idx:]
+
+    if not new_messages and last_idx > 0:
+        return {"content": "我已了解当前进展，暂无补充。", "status": "skipped"}
+
+    # 格式化新消息为可读文本
+    formatted_new_input = "\n".join([
+        f"[{msg.get('role', '未知专家')}]: {msg.get('content', '')}"
+        for msg in new_messages
+    ])
+
+    # 更新偏移量
+    oasis_session_offsets[session_id] = len(req.history)
+
+    # --- 构造系统触发消息，通知 Agent 参与讨论 ---
+    trigger_text = (
+        f"[外部学术会议邀请]\n"
+        f"你被邀请参加一场 OASIS 学术讨论会议。\n"
+        f"讨论主题: {req.topic}\n\n"
+        f"--- 其他专家的最新发言 ---\n"
+        f"{formatted_new_input}\n"
+        f"--- 发言结束 ---\n\n"
+        f"请认真阅读以上内容，作为专家给出你的观点和分析。"
+        f"直接回复你的意见即可，不需要调用任何工具。"
+    )
+
+    # 使用独立的会话 ID 避免污染用户的正常对话
+    oasis_thread_id = f"{req.user_id}#oasis_{session_id}"
+    config = {"configurable": {"thread_id": oasis_thread_id}}
+    system_input = {
+        "messages": [HumanMessage(content=trigger_text)],
+        "trigger_source": "system",
+        "enabled_tools": None,
+        "user_id": req.user_id,
+        "session_id": f"oasis_{session_id}",
+    }
+
+    try:
+        result = await asyncio.wait_for(
+            agent.agent_app.ainvoke(system_input, config),
+            timeout=120.0,
+        )
+        reply = result["messages"][-1].content
+        return {"content": reply, "expert_name": "MiniTimeBot", "status": "success"}
+    except asyncio.TimeoutError:
+        return {
+            "content": "(Agent 思考过久，未能在规定时间内回应)",
+            "expert_name": "MiniTimeBot",
+            "status": "timeout",
+        }
+    except Exception as e:
+        return {
+            "content": f"(Agent 处理异常: {str(e)})",
+            "expert_name": "MiniTimeBot",
+            "status": "error",
+        }
 
 
 if __name__ == "__main__":
