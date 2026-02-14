@@ -5,6 +5,7 @@ import asyncio
 import secrets
 from contextlib import asynccontextmanager
 
+import aiosqlite
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -275,6 +276,120 @@ async def cancel_agent(req: CancelRequest):
     task_key = f"{req.user_id}#{req.session_id}"
     await agent.cancel_task(task_key)
     return {"status": "success", "message": "已终止"}
+
+
+# ------------------------------------------------------------------
+# Session history: 从 checkpoint DB 读取会话列表和历史消息
+# ------------------------------------------------------------------
+
+class SessionListRequest(BaseModel):
+    user_id: str
+    password: str
+
+class SessionHistoryRequest(BaseModel):
+    user_id: str
+    password: str
+    session_id: str
+
+
+@app.post("/sessions")
+async def list_sessions(req: SessionListRequest):
+    """列出用户的所有会话，返回 session_id 列表及每个会话的摘要信息。"""
+    if not verify_password(req.user_id, req.password):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    prefix = f"{req.user_id}#"
+    sessions = []
+
+    # 从 checkpoint DB 中查询该用户的所有 thread_id
+    async with aiosqlite.connect(db_path) as db:
+        cursor = await db.execute(
+            "SELECT DISTINCT thread_id FROM checkpoints WHERE thread_id LIKE ? ORDER BY thread_id",
+            (f"{prefix}%",),
+        )
+        rows = await cursor.fetchall()
+
+    for (thread_id,) in rows:
+        sid = thread_id[len(prefix):]
+
+        # 获取最新 checkpoint 中的第一条和最后一条用户消息作为摘要
+        config = {"configurable": {"thread_id": thread_id}}
+        snapshot = await agent.agent_app.aget_state(config)
+        msgs = snapshot.values.get("messages", []) if snapshot and snapshot.values else []
+
+        # 找第一条用户消息作为标题
+        first_human = ""
+        last_human = ""
+        msg_count = 0
+        for m in msgs:
+            if hasattr(m, "content") and type(m).__name__ == "HumanMessage":
+                content = m.content if isinstance(m.content, str) else str(m.content)
+                # 跳过系统触发消息
+                if content.startswith("[系统触发]") or content.startswith("[外部学术会议邀请]"):
+                    continue
+                msg_count += 1
+                if not first_human:
+                    first_human = content[:50]
+                last_human = content[:50]
+
+        if not first_human:
+            continue  # 空会话或纯系统会话，不展示
+
+        sessions.append({
+            "session_id": sid,
+            "title": first_human,
+            "last_message": last_human,
+            "message_count": msg_count,
+        })
+
+    return {"status": "success", "sessions": sessions}
+
+
+@app.post("/session_history")
+async def get_session_history(req: SessionHistoryRequest):
+    """获取指定会话的完整对话历史（仅返回 Human/AI 消息）。"""
+    if not verify_password(req.user_id, req.password):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    thread_id = f"{req.user_id}#{req.session_id}"
+    config = {"configurable": {"thread_id": thread_id}}
+    snapshot = await agent.agent_app.aget_state(config)
+
+    if not snapshot or not snapshot.values:
+        return {"status": "success", "messages": []}
+
+    msgs = snapshot.values.get("messages", [])
+    result = []
+    for m in msgs:
+        msg_type = type(m).__name__
+        if msg_type == "HumanMessage":
+            content = m.content if isinstance(m.content, str) else str(m.content)
+            result.append({"role": "user", "content": content})
+        elif msg_type == "AIMessage":
+            content = m.content if isinstance(m.content, str) else str(m.content)
+            # 提取 tool_calls 信息
+            tool_calls = []
+            if hasattr(m, "tool_calls") and m.tool_calls:
+                for tc in m.tool_calls:
+                    tool_calls.append({
+                        "name": tc.get("name", ""),
+                        "args": tc.get("args", {}),
+                    })
+            if content or tool_calls:
+                entry = {"role": "assistant", "content": content}
+                if tool_calls:
+                    entry["tool_calls"] = tool_calls
+                result.append(entry)
+        elif msg_type == "ToolMessage":
+            content = m.content if isinstance(m.content, str) else str(m.content)
+            tool_name = getattr(m, "name", "")
+            result.append({
+                "role": "tool",
+                "content": content,
+                "tool_name": tool_name,
+            })
+
+    return {"status": "success", "messages": result}
 
 
 @app.post("/system_trigger")

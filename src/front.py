@@ -18,6 +18,8 @@ LOCAL_AGENT_STREAM_URL = f"http://127.0.0.1:{PORT_AGENT}/ask_stream"
 LOCAL_AGENT_CANCEL_URL = f"http://127.0.0.1:{PORT_AGENT}/cancel"
 LOCAL_LOGIN_URL = f"http://127.0.0.1:{PORT_AGENT}/login"
 LOCAL_TOOLS_URL = f"http://127.0.0.1:{PORT_AGENT}/tools"
+LOCAL_SESSIONS_URL = f"http://127.0.0.1:{PORT_AGENT}/sessions"
+LOCAL_SESSION_HISTORY_URL = f"http://127.0.0.1:{PORT_AGENT}/session_history"
 INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "")
 
 # OASIS Forum proxy
@@ -182,8 +184,30 @@ HTML_TEMPLATE = """
         .main-layout { display: flex; height: var(--app-height, 100vh); max-width: 100%; overflow: hidden; }
         .chat-main { flex: 1; min-width: 0; max-width: 900px; display: flex; flex-direction: column; height: var(--app-height, 100vh); overflow: hidden; }
 
+        /* === Session sidebar === */
+        .session-sidebar {
+            width: 260px; flex-shrink: 0; display: flex; flex-direction: column;
+            height: var(--app-height, 100vh); background: white; border-right: 1px solid #e5e7eb;
+            overflow: hidden;
+        }
+        .session-item {
+            padding: 8px 10px; border-radius: 8px; cursor: pointer; transition: background 0.15s;
+            border: 1px solid transparent;
+        }
+        .session-item:hover { background: #f3f4f6; }
+        .session-item.active { background: #eff6ff; border-color: #bfdbfe; }
+        .session-item .session-title { font-size: 13px; font-weight: 500; color: #374151; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .session-item .session-meta { font-size: 11px; color: #9ca3af; margin-top: 2px; }
+
         /* === Mobile responsive === */
         @media (max-width: 768px) {
+            .session-sidebar {
+                position: fixed; left: 0; top: 0; z-index: 200; width: 75vw; max-width: 300px;
+                box-shadow: 4px 0 20px rgba(0,0,0,0.15);
+            }
+            .session-overlay {
+                position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 199;
+            }
             .main-layout { flex-direction: column; height: var(--app-height, 100vh); overflow: hidden; }
             .chat-main { max-width: 100%; width: 100%; height: var(--app-height, 100vh); }
             /* Header: fixed at top - auto height for safe area */
@@ -292,6 +316,17 @@ HTML_TEMPLATE = """
     <!-- ========== 主布局（聊天 + OASIS）（初始隐藏） ========== -->
     <div id="chat-screen" class="main-layout safe-top safe-bottom safe-left safe-right" style="display:none;">
 
+        <!-- ===== 历史会话侧边栏 ===== -->
+        <div id="session-sidebar" class="session-sidebar" style="display:none;">
+            <div class="p-3 border-b bg-gray-50 flex justify-between items-center flex-shrink-0">
+                <span class="text-sm font-bold text-gray-700">💬 历史对话</span>
+                <button onclick="closeSessionSidebar()" class="text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
+            </div>
+            <div id="session-list" class="flex-1 overflow-y-auto p-2 space-y-1">
+                <div class="text-xs text-gray-400 text-center py-4">加载中...</div>
+            </div>
+        </div>
+
         <!-- ===== 左侧：聊天区 ===== -->
         <div class="chat-main h-screen flex flex-col bg-white border-x border-gray-200 shadow-2xl">
             <header class="p-3 sm:p-4 border-b bg-white flex justify-between items-start sm:items-center gap-2 flex-shrink-0">
@@ -305,6 +340,11 @@ HTML_TEMPLATE = """
                 <div class="flex items-center space-x-1 sm:space-x-2 mobile-header-actions flex-shrink-0">
                     <div id="uid-display" class="text-xs sm:text-sm font-mono bg-gray-100 px-2 sm:px-3 py-1 rounded border truncate max-w-[80px] sm:max-w-none"></div>
                     <div id="session-display" class="text-[10px] sm:text-xs font-mono bg-blue-50 text-blue-600 px-1.5 sm:px-2 py-1 rounded border border-blue-200 cursor-default" title="当前对话号"></div>
+                    <!-- History Button -->
+                    <button onclick="toggleSessionSidebar()" class="desktop-only-btn text-[10px] sm:text-xs bg-gray-50 text-gray-600 hover:bg-gray-100 px-2 py-1 rounded border border-gray-200 transition-colors flex items-center justify-center" title="历史对话">
+                        <span class="hidden sm:inline">📋历史</span>
+                        <span class="sm:hidden text-base leading-none">📋</span>
+                    </button>
                     <!-- New Session Button: Visible on all devices -->
                     <button onclick="handleNewSession()" class="text-[10px] sm:text-xs bg-green-50 text-green-600 hover:bg-green-100 px-2 py-1 rounded border border-green-200 transition-colors mr-1 flex items-center justify-center" title="开启新对话">
                         <span class="sm:hidden text-base font-bold leading-none">+</span>
@@ -315,6 +355,7 @@ HTML_TEMPLATE = """
                     <div class="mobile-menu-wrapper" style="position:relative;">
                         <button onclick="toggleMobileMenu()" class="mobile-menu-btn text-[10px] bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded border border-gray-300 transition-colors" title="更多操作">⋮</button>
                         <div id="mobile-menu-dropdown" class="mobile-menu-dropdown" style="display:none;">
+                            <button onclick="toggleSessionSidebar(); closeMobileMenu();" class="mobile-menu-item">📋 历史对话</button>
                             <button onclick="handleNewSession(); closeMobileMenu();" class="mobile-menu-item">➕ 新对话</button>
                             <button onclick="toggleOasisMobile(); closeMobileMenu();" class="mobile-menu-item">🏛️ OASIS</button>
                             <button onclick="handleLogout(); closeMobileMenu();" class="mobile-menu-item text-red-500">🚪 退出</button>
@@ -492,6 +533,137 @@ HTML_TEMPLATE = """
                         🆕 已开启新对话。我是 Xavier 智能助手，请输入你的指令。
                     </div>
                 </div>`;
+        }
+
+        // ===== 历史会话侧边栏 =====
+        let sessionSidebarOpen = false;
+
+        function toggleSessionSidebar() {
+            if (sessionSidebarOpen) { closeSessionSidebar(); } else { openSessionSidebar(); }
+        }
+
+        async function openSessionSidebar() {
+            const sidebar = document.getElementById('session-sidebar');
+            sidebar.style.display = 'flex';
+            sessionSidebarOpen = true;
+            // 移动端加遮罩
+            if (window.innerWidth <= 768) {
+                let overlay = document.getElementById('session-overlay');
+                if (!overlay) {
+                    overlay = document.createElement('div');
+                    overlay.id = 'session-overlay';
+                    overlay.className = 'session-overlay';
+                    overlay.onclick = closeSessionSidebar;
+                    sidebar.parentElement.appendChild(overlay);
+                }
+                overlay.style.display = 'block';
+            }
+            await loadSessionList();
+        }
+
+        function closeSessionSidebar() {
+            document.getElementById('session-sidebar').style.display = 'none';
+            const overlay = document.getElementById('session-overlay');
+            if (overlay) overlay.style.display = 'none';
+            sessionSidebarOpen = false;
+        }
+
+        async function loadSessionList() {
+            const listEl = document.getElementById('session-list');
+            listEl.innerHTML = '<div class="text-xs text-gray-400 text-center py-4">加载中...</div>';
+            try {
+                const resp = await fetch('/proxy_sessions');
+                const data = await resp.json();
+                if (!data.sessions || data.sessions.length === 0) {
+                    listEl.innerHTML = '<div class="text-xs text-gray-400 text-center py-4">暂无历史对话</div>';
+                    return;
+                }
+                listEl.innerHTML = '';
+                // 按 session_id 倒序（新的在前）
+                data.sessions.sort((a, b) => b.session_id.localeCompare(a.session_id));
+                for (const s of data.sessions) {
+                    const isActive = s.session_id === currentSessionId;
+                    const div = document.createElement('div');
+                    div.className = 'session-item' + (isActive ? ' active' : '');
+                    div.innerHTML = `
+                        <div class="session-title">${escapeHtml(s.title)}</div>
+                        <div class="session-meta">#${s.session_id.slice(-6)} · ${s.message_count}条消息</div>
+                    `;
+                    div.onclick = () => switchToSession(s.session_id);
+                    listEl.appendChild(div);
+                }
+            } catch (e) {
+                listEl.innerHTML = '<div class="text-xs text-red-400 text-center py-4">加载失败</div>';
+            }
+        }
+
+        async function switchToSession(sessionId) {
+            if (sessionId === currentSessionId) { closeSessionSidebar(); return; }
+            currentSessionId = sessionId;
+            sessionStorage.setItem('sessionId', sessionId);
+            updateSessionDisplay();
+            closeSessionSidebar();
+
+            // 加载该会话的历史消息
+            const chatBox = document.getElementById('chat-box');
+            chatBox.innerHTML = '<div class="text-xs text-gray-400 text-center py-4">加载历史消息...</div>';
+
+            try {
+                const resp = await fetch('/proxy_session_history', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ session_id: sessionId })
+                });
+                const data = await resp.json();
+                chatBox.innerHTML = '';
+
+                if (!data.messages || data.messages.length === 0) {
+                    chatBox.innerHTML = `
+                        <div class="flex justify-start">
+                            <div class="message-agent bg-white border p-4 max-w-[85%] shadow-sm text-gray-700">
+                                （此对话暂无消息记录）
+                            </div>
+                        </div>`;
+                    return;
+                }
+
+                for (const msg of data.messages) {
+                    if (msg.role === 'user') {
+                        chatBox.innerHTML += `
+                            <div class="flex justify-end">
+                                <div class="message-user bg-blue-600 text-white p-4 max-w-[85%] shadow-sm">
+                                    ${escapeHtml(msg.content)}
+                                </div>
+                            </div>`;
+                    } else if (msg.role === 'tool') {
+                        chatBox.innerHTML += `
+                            <div class="flex justify-start">
+                                <div class="bg-gray-100 border border-dashed border-gray-300 p-3 max-w-[85%] shadow-sm text-xs text-gray-500 rounded-lg">
+                                    <div class="font-semibold text-gray-600 mb-1">🔧 工具返回: ${escapeHtml(msg.tool_name || '')}</div>
+                                    <pre class="whitespace-pre-wrap break-words">${escapeHtml(msg.content.length > 500 ? msg.content.slice(0, 500) + '...' : msg.content)}</pre>
+                                </div>
+                            </div>`;
+                    } else {
+                        let toolCallsHtml = '';
+                        if (msg.tool_calls && msg.tool_calls.length > 0) {
+                            const callsList = msg.tool_calls.map(tc =>
+                                `<span class="inline-block bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded mr-1 mb-1">🔧 ${escapeHtml(tc.name)}</span>`
+                            ).join('');
+                            toolCallsHtml = `<div class="mb-2">${callsList}</div>`;
+                        }
+                        chatBox.innerHTML += `
+                            <div class="flex justify-start">
+                                <div class="message-agent bg-white border p-4 max-w-[85%] shadow-sm text-gray-700 markdown-body">
+                                    ${toolCallsHtml}${msg.content ? marked.parse(msg.content) : '<span class="text-gray-400 text-xs">(调用工具中...)</span>'}
+                                </div>
+                            </div>`;
+                    }
+                }
+                chatBox.scrollTop = chatBox.scrollHeight;
+            } catch (e) {
+                chatBox.innerHTML = `
+                    <div class="text-xs text-red-400 text-center py-4">加载失败: ${e.message}</div>`;
+            }
         }
 
         // ===== 登录逻辑 =====
@@ -1558,6 +1730,37 @@ def proxy_tools():
 def proxy_logout():
     session.clear()
     return jsonify({"status": "success"})
+
+
+@app.route("/proxy_sessions")
+def proxy_sessions():
+    """代理获取用户会话列表"""
+    user_id = session.get("user_id")
+    password = session.get("password")
+    if not user_id or not password:
+        return jsonify({"error": "未登录"}), 401
+    try:
+        r = requests.post(LOCAL_SESSIONS_URL, json={"user_id": user_id, "password": password}, timeout=15)
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_session_history", methods=["POST"])
+def proxy_session_history():
+    """代理获取指定会话的历史消息"""
+    user_id = session.get("user_id")
+    password = session.get("password")
+    if not user_id or not password:
+        return jsonify({"error": "未登录"}), 401
+    sid = request.json.get("session_id", "")
+    try:
+        r = requests.post(LOCAL_SESSION_HISTORY_URL, json={
+            "user_id": user_id, "password": password, "session_id": sid
+        }, timeout=15)
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ===== OASIS Proxy Routes =====
