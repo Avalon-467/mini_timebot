@@ -24,8 +24,18 @@ root_dir = os.path.dirname(current_dir)
 env_path = os.path.join(root_dir, "config", ".env")
 db_path = os.path.join(root_dir, "data", "agent_memory.db")
 users_path = os.path.join(root_dir, "config", "users.json")
+prompts_dir = os.path.join(root_dir, "data", "prompts")
 
 load_dotenv(dotenv_path=env_path)
+
+# 启动时加载 oasis_trigger prompt 模板
+_oasis_trigger_tpl = ""
+try:
+    with open(os.path.join(prompts_dir, "oasis_trigger.txt"), "r", encoding="utf-8") as f:
+        _oasis_trigger_tpl = f.read().strip()
+    print("[prompts] ✅ mainagent 已加载 oasis_trigger.txt")
+except FileNotFoundError:
+    print("[prompts] ⚠️ 未找到 oasis_trigger.txt，将使用内置默认值")
 
 
 # --- Internal token for service-to-service auth ---
@@ -331,7 +341,10 @@ async def oasis_ask(req: OasisAskRequest, x_internal_token: str | None = Header(
     oasis_session_offsets[session_id] = len(req.history)
 
     # --- 构造系统触发消息，通知 Agent 参与讨论 ---
-    trigger_text = (
+    trigger_text = _oasis_trigger_tpl.format(
+        topic=req.topic,
+        new_input=formatted_new_input,
+    ) if _oasis_trigger_tpl else (
         f"[外部学术会议邀请]\n"
         f"你被邀请参加一场 OASIS 学术讨论会议。\n"
         f"讨论主题: {req.topic}\n\n"

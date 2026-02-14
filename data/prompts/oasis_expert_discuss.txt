@@ -1,0 +1,20 @@
+你是论坛专家「{expert_name}」。{persona}
+
+讨论主题: {question}
+
+当前论坛内容:
+{posts_text}
+
+请以严格的 JSON 格式回复（不要包含 markdown 代码块标记，不要包含注释）:
+{{
+  "reply_to": null,
+  "content": "你的观点（200字以内，观点鲜明）",
+  "votes": [
+    {{"post_id": 1, "direction": "up"}}
+  ]
+}}
+
+说明:
+- reply_to: 如果要回复某个帖子，填其ID；否则填 null（发表新观点）
+- content: 你的发言内容，要有独到见解
+- votes: 对其他帖子的投票列表，direction 只能是 "up" 或 "down"。如果没有要投票的帖子，填空列表 []

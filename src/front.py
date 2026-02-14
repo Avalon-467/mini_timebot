@@ -1246,7 +1246,7 @@ HTML_TEMPLATE = """
         const chatMain = document.querySelector('.chat-main');
         const chatContainer = document.querySelector('.chat-container');
         const header = document.querySelector('header');
-        const inputArea = document.querySelector('.p-2.sm\\:p-4.border-t');
+        const inputArea = document.querySelector('.border-t.p-2');
         
         // PWA Standalone mode detection
         const isPWA = window.matchMedia('(display-mode: standalone)').matches || 

@@ -14,6 +14,17 @@ from langchain_core.messages import HumanMessage
 from oasis.forum import DiscussionForum
 from oasis.experts import ExpertAgent, EXPERT_CONFIGS
 
+# 加载总结 prompt 模板（模块级别，导入时执行一次）
+_prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "prompts")
+_summary_tpl_path = os.path.join(_prompts_dir, "oasis_summary.txt")
+try:
+    with open(_summary_tpl_path, "r", encoding="utf-8") as f:
+        _SUMMARY_PROMPT_TPL = f.read().strip()
+    print("[prompts] ✅ oasis 已加载 oasis_summary.txt")
+except FileNotFoundError:
+    print(f"[prompts] ⚠️ 未找到 {_summary_tpl_path}，使用内置默认模板")
+    _SUMMARY_PROMPT_TPL = ""
+
 
 def _get_summarizer() -> ChatDeepSeek:
     """Create a low-temperature LLM for reliable summarization."""
@@ -116,16 +127,24 @@ class DiscussionEngine:
             for p in top_posts
         ])
 
-        prompt = (
-            f"你是一个讨论总结专家。以下是关于「{self.forum.question}」的多专家讨论结果。\n\n"
-            f"共 {len(all_posts)} 条帖子，经过 {self.forum.current_round} 轮讨论。\n\n"
-            f"获得最高认可的观点:\n{posts_text}\n\n"
-            "请综合以上高赞观点，给出一个全面、平衡、有结论性的最终回答（300字以内）。\n"
-            "要求:\n"
-            "1. 清晰概括各方核心观点\n"
-            "2. 指出主要共识和分歧\n"
-            "3. 给出明确的结论性建议\n"
-        )
+        if _SUMMARY_PROMPT_TPL:
+            prompt = _SUMMARY_PROMPT_TPL.format(
+                question=self.forum.question,
+                post_count=len(all_posts),
+                round_count=self.forum.current_round,
+                posts_text=posts_text,
+            )
+        else:
+            prompt = (
+                f"你是一个讨论总结专家。以下是关于「{self.forum.question}」的多专家讨论结果。\n\n"
+                f"共 {len(all_posts)} 条帖子，经过 {self.forum.current_round} 轮讨论。\n\n"
+                f"获得最高认可的观点:\n{posts_text}\n\n"
+                "请综合以上高赞观点，给出一个全面、平衡、有结论性的最终回答（300字以内）。\n"
+                "要求:\n"
+                "1. 清晰概括各方核心观点\n"
+                "2. 指出主要共识和分歧\n"
+                "3. 给出明确的结论性建议\n"
+            )
 
         try:
             resp = await self.summarizer.ainvoke([HumanMessage(content=prompt)])
