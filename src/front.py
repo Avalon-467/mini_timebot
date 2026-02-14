@@ -18,6 +18,7 @@ LOCAL_AGENT_STREAM_URL = f"http://127.0.0.1:{PORT_AGENT}/ask_stream"
 LOCAL_AGENT_CANCEL_URL = f"http://127.0.0.1:{PORT_AGENT}/cancel"
 LOCAL_LOGIN_URL = f"http://127.0.0.1:{PORT_AGENT}/login"
 LOCAL_TOOLS_URL = f"http://127.0.0.1:{PORT_AGENT}/tools"
+INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "")
 
 # OASIS Forum proxy
 PORT_OASIS = int(os.getenv("PORT_OASIS", "51202"))
@@ -1548,7 +1549,7 @@ def proxy_cancel():
 def proxy_tools():
     """代理获取工具列表请求到后端 Agent"""
     try:
-        r = requests.get(LOCAL_TOOLS_URL, timeout=10)
+        r = requests.get(LOCAL_TOOLS_URL, headers={"X-Internal-Token": INTERNAL_TOKEN}, timeout=10)
         return jsonify(r.json())
     except Exception as e:
         return jsonify({"error": str(e), "tools": []}), 500
