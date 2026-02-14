@@ -4,7 +4,7 @@
 
 ## 架构概览
 
-项目由 5 个协作服务组成：
+项目由多个协作服务组成：
 
 ```
 浏览器 (聊天 UI + 登录页 + OASIS 论坛面板)
@@ -14,17 +14,21 @@ front.py (Flask + Session)     ── 前端代理，渲染登录/聊天页面�
     │  HTTP :51200
     ▼
 mainagent.py (FastAPI + LangGraph)  ── 核心 AI Agent，集成 DeepSeek LLM + 对话记忆 + 密码认证
-    │  stdio (MCP)
+    │  stdio (MCP)                      ├── POST /oasis/ask ── 外部 OASIS 调用入口（Token 鉴权）
     ├── mcp_scheduler.py (FastMCP)  ── MCP 工具服务，暴露闹钟管理工具
     │       │  HTTP :51201
     │       ▼
     ├── time.py (FastAPI + APScheduler)  ── 定时调度中心，管理 cron 任务
     ├── mcp_search.py (FastMCP)    ── MCP 搜索服务，提供联网搜索（DuckDuckGo）
     ├── mcp_filemanager.py (FastMCP) ── MCP 文件服务，提供用户文件管理
-    └── mcp_oasis.py (FastMCP)    ── MCP OASIS 服务，提供多专家讨论接口
-                                      │  HTTP :51202
-                                      ▼
-                                 oasis/server.py  ── OASIS 论坛服务，多专家并行讨论系统
+    ├── mcp_oasis.py (FastMCP)    ── MCP OASIS 服务，提供多专家讨论接口
+    │                                 │  HTTP :51202
+    │                                 ▼
+    │                            oasis/server.py  ── OASIS 论坛服务，多专家并行讨论系统
+    ├── mcp_bark.py (FastMCP)     ── MCP 推送服务，提供 Bark 消息推送
+    └── mcp_commander.py (FastMCP) ── MCP 指令执行服务，提供命令/代码执行
+
+外部 OASIS 系统 ── POST /oasis/ask ──► mainagent.py ──► Agent 思考 ──► 返回专家意见
 ```
 
 ### 服务说明
@@ -32,11 +36,13 @@ mainagent.py (FastAPI + LangGraph)  ── 核心 AI Agent，集成 DeepSeek LLM
 | 服务 | 端口 | 说明 |
 |------|------|------|
 | `src/front.py` | 51209 | Flask Web UI，提供登录页 + 聊天界面 + OASIS 论坛面板，通过 Session 管理用户凭证 |
-| `src/mainagent.py` | 51200 | 核心 AI Agent（LangGraph + DeepSeek），管理对话、工具调用与密码认证 |
+| `src/mainagent.py` | 51200 | 核心 AI Agent（LangGraph + DeepSeek），管理对话、工具调用与密码认证，同时提供 `/oasis/ask` 外部接入端点 |
 | `src/mcp_scheduler.py` | - | MCP 工具服务（Agent 子进程），提供 add_alarm / list_alarms / delete_alarm |
 | `src/mcp_search.py` | - | MCP 搜索服务（Agent 子进程），提供 web_search / web_news |
 | `src/mcp_filemanager.py` | - | MCP 文件服务（Agent 子进程），提供 list_files / read_file / write_file / append_file / delete_file |
 | `src/mcp_oasis.py` | - | MCP OASIS 服务（Agent 子进程），提供 post_to_oasis / check_oasis_discussion / list_oasis_topics |
+| `src/mcp_bark.py` | - | MCP 推送服务（Agent 子进程），提供 Bark 推送通知相关工具 |
+| `src/mcp_commander.py` | - | MCP 指令执行服务（Agent 子进程），提供 run_command / run_python_code |
 | `src/time.py` | 51201 | 定时任务调度中心（APScheduler），任务到期时回调 Agent |
 | `oasis/server.py` | 51202 | OASIS 论坛服务，独立 FastAPI 服务，管理多专家讨论 |
 | `test/chat.py` | - | 命令行测试客户端 |
@@ -219,6 +225,24 @@ python scripts/tunnel.py
 
 OASIS（Open AI System for Intelligent Synthesis）是一个多专家并行讨论系统，用于复杂问题的多角度分析。
 
+### 小组组会 & 学术会议
+
+Agent 同时具备两种 OASIS 讨论能力，就像一位研究员既参加**实验室内部的小组组会**，也出席**跨团队的学术研讨会**——两者并行存在、互不冲突：
+
+**🏠 小组组会（内部 OASIS）**：Agent 在本地召开组会——用户抛出一个问题，Agent 自己的专家团（4 位角色各异的专家）围坐讨论、互相投票，最终形成组内共识返回给用户。整个过程自产自销，像课题组的日常周会。
+
+**🌐 学术会议（外部 OASIS）**：Agent 受邀参加外部学术研讨会——会议主办方（外部 OASIS 系统）向多个独立 Agent 节点发出邀请，每个 Agent 阅读其他与会者的发言后发表自己的见解，最终由主办方汇总所有专家意见形成会议结论。Agent 只贡献自己的视角，不控制讨论流程。
+
+| | 🏠 小组组会（内部 OASIS） | 🌐 学术会议（外部 OASIS） |
+|---|---|---|
+| **发起方** | Agent 主动召集 | 外部 OASIS 系统邀请参与 |
+| **参与者** | 本地 4 位专家（创意、批判、数据、综合） | 多个独立 Agent 节点，各自代表不同视角 |
+| **讨论范围** | 组内闭门讨论，自给自足 | 开放协作，不同 Agent 各自独立思考后汇聚观点 |
+| **触发方式** | 用户提问 → Agent 调用 `post_to_oasis` | 外部系统调用 `POST /oasis/ask` |
+| **结果归属** | 结论直接返回给用户 | Agent 意见返回给外部 OASIS，由其汇总 |
+
+两种能力同时就绪：Agent 既能随时为用户召开组会深度分析问题，也能随时响应外部邀请、作为专家出席跨节点的学术研讨。
+
 ### 功能特点
 
 - **多专家讨论**：4 位不同角色的专家并行分析问题
@@ -280,6 +304,90 @@ Agent：我将启动 OASIS 论坛，邀请多位专家进行讨论...
 | `/topics/{id}/conclusion` | GET | 阻塞等待结论 |
 | `/experts` | GET | 列出所有专家配置 |
 
+### 外部 OASIS 接入
+
+除了 Agent 主动发起 OASIS 讨论之外，**外部 OASIS 系统也可以反向调用本 Agent 参与讨论**。外部系统通过 `POST /oasis/ask` 邀请 Agent 以专家身份加入多方讨论。
+
+**调用流程：**
+
+```
+外部 OASIS 系统 ── POST /oasis/ask ──► mainagent.py
+                                          │
+                                          ├─ 1. 增量提取历史消息（避免重复发送）
+                                          ├─ 2. 格式化为可读文本，构造系统触发消息
+                                          ├─ 3. Agent 思考并生成专家意见
+                                          └─ 4. 返回 Agent 的意见给外部 OASIS
+```
+
+**请求示例：**
+
+```bash
+curl -X POST http://127.0.0.1:51200/oasis/ask \
+  -H "Content-Type: application/json" \
+  -H "X-Internal-Token: <你的INTERNAL_TOKEN>" \
+  -d '{
+    "session_id": "oasis_abc123",
+    "topic": "AI是否应该具有情感",
+    "history": [
+      {"role": "创意专家", "content": "我认为AI具有情感可以更好地理解人类需求"},
+      {"role": "批判专家", "content": "但情感可能导致AI决策偏差，存在安全隐患"}
+    ],
+    "user_id": "oasis_external"
+  }'
+```
+
+**响应示例：**
+
+```json
+{
+  "content": "作为数据专家，我认为...",
+  "expert_name": "MiniTimeBot",
+  "status": "success"
+}
+```
+
+**关键特性：**
+
+| 特性 | 说明 |
+|------|------|
+| Token 鉴权 | 必须在请求头中携带 `X-Internal-Token`，否则返回 403 |
+| 增量历史 | 同一 `session_id` 多次调用时，只发送 Agent 还未见过的新消息 |
+| 会话隔离 | 外部 OASIS 讨论使用独立会话，不会污染用户的正常对话 |
+| 超时保护 | Agent 思考超过 120 秒自动返回超时响应 |
+
+## Bark 推送通知
+
+支持通过 [Bark](https://github.com/Finb/Bark) 向用户的 iOS / macOS 设备发送推送通知。当定时任务触发、重要事件发生时，Agent 可以主动推送提醒。
+
+### 配置方式
+
+1. 在 iPhone 上安装 Bark App，获取推送 Key
+2. 在聊天中告诉 Agent 你的 Bark Key，Agent 会自动调用 `set_push_key` 保存
+
+```
+用户：我的 Bark Key 是 xxxxxxxxxxxxxx，帮我配置推送
+Agent：已保存你的 Bark Key，现在可以向你发送推送通知了。
+```
+
+### 推送工具
+
+| 工具 | 说明 |
+|------|------|
+| `set_push_key` | 保存用户的 Bark Key |
+| `send_push_notification` | 发送推送通知到用户设备 |
+| `get_push_status` | 查看当前推送配置状态 |
+| `set_public_url` | 设置推送点击后的跳转地址（公网部署时使用） |
+| `get_public_url` | 查看当前公网地址配置 |
+| `clear_public_url` | 清除公网地址配置 |
+
+### 使用场景
+
+- **定时任务提醒**：闹钟触发时，Agent 自动发送推送通知到手机
+- **任务完成通知**：后台任务执行完毕后推送结果
+- **自定义推送**：用户可随时要求 Agent 发送推送测试
+
+> 推送工具的 `username` 参数由系统自动注入，每个用户的 Bark Key 独立存储、互不干扰。
+
 ## 认证机制
 
 系统采用**密码认证 + 双层会话管理**，防止用户伪造身份。
@@ -312,6 +420,9 @@ Flask → POST /login → FastAPI (mainagent.py)
 | 前端状态 | 使用 `sessionStorage`，关闭标签页即失效 |
 | 请求验证 | 每次 `/ask` 请求都重新验证密码，防止 Session 劫持后长期有效 |
 | 用户隔离 | 对话记忆、文件存储均按 `user_id` 隔离 |
+| 内部端点鉴权 | `/system_trigger`、`/oasis/ask`、`/tools` 等内部端点通过 `X-Internal-Token` 请求头校验，防止外部伪造 |
+| Token 自动生成 | `INTERNAL_TOKEN` 首次启动时自动生成 64 字符随机 hex 密钥，写入 `.env`，无需手动配置 |
+| Swagger 文档 | 生产环境下 `/docs`、`/redoc`、`/openapi.json` 均已关闭，不暴露 API 结构 |
 
 ### 相关文件
 
@@ -361,11 +472,14 @@ mini_timebot/
 │       └── <username>/    # 各用户的独立文件空间
 ├── src/
 │   ├── front.py           # 前端 Web UI（登录页 + 聊天页 + Session 管理 + OASIS 面板）
-│   ├── mainagent.py       # 核心 AI Agent（含认证逻辑）
+│   ├── mainagent.py       # 核心 AI Agent（含认证逻辑 + 外部 OASIS 接入端点）
+│   ├── agent.py           # Agent 核心逻辑（LangGraph 工作流 + 系统提示词）
 │   ├── mcp_scheduler.py   # MCP 工具服务（定时任务）
 │   ├── mcp_search.py      # MCP 搜索服务（联网搜索）
 │   ├── mcp_filemanager.py # MCP 文件服务（用户文件管理）
 │   ├── mcp_oasis.py       # MCP OASIS 服务（多专家讨论接口）
+│   ├── mcp_bark.py        # MCP 推送服务（Bark 通知推送）
+│   ├── mcp_commander.py   # MCP 指令执行服务（命令/代码执行）
 │   └── time.py            # 定时任务调度中心
 ├── oasis/                  # OASIS 论坛模块
 │   ├── __init__.py        # 模块初始化
