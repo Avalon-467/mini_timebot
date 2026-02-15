@@ -334,9 +334,11 @@ class MiniTimeAgent:
         # 每次进入前清理：移除末尾不完整的 tool_calls（有 AIMessage 带 tool_calls 但缺少 ToolMessage 回复）
         history_messages = self._sanitize_messages(history_messages)
 
-        # 清理所有消息中的多模态内容（file/image parts），只保留文本
+        # 清理历史消息中的多模态内容（file/image/audio parts），只保留文本
         # 避免旧的二进制附件在后续轮次反复发送给 LLM 导致上游 API 报错
-        history_messages = self._strip_multimodal_parts(history_messages)
+        # 注意：保留最后一条 HumanMessage 的多模态内容（当前轮用户输入）
+        if len(history_messages) > 1:
+            history_messages = self._strip_multimodal_parts(history_messages[:-1]) + [history_messages[-1]]
 
         # 如果是系统触发，且最后一条不是 ToolMessage（非工具回调轮），给它加上系统触发说明
         is_system = state.get("trigger_source") == "system"
@@ -350,8 +352,14 @@ class MiniTimeAgent:
         # 正常对话流程（用户和系统触发共用）
         if tool_status_prompt and len(history_messages) >= 1:
             last_msg = history_messages[-1]
-            augmented_content = f"[系统通知] {tool_status_prompt}\n\n---\n{last_msg.content}"
-            augmented_msg = HumanMessage(content=augmented_content)
+            # 如果最后一条是多模态 content（list），将通知插入为第一个 text part
+            if isinstance(last_msg.content, list):
+                notification = {"type": "text", "text": f"[系统通知] {tool_status_prompt}\n\n---\n"}
+                augmented_content = [notification] + list(last_msg.content)
+                augmented_msg = HumanMessage(content=augmented_content)
+            else:
+                augmented_content = f"[系统通知] {tool_status_prompt}\n\n---\n{last_msg.content}"
+                augmented_msg = HumanMessage(content=augmented_content)
             input_messages = (
                 [SystemMessage(content=base_prompt)]
                 + history_messages[:-1]
