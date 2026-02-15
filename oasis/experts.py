@@ -7,7 +7,7 @@ by reading others' posts, publishing their own views, and voting.
 
 import json
 import os
-from langchain_deepseek import ChatDeepSeek
+from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
 
 from oasis.forum import DiscussionForum
@@ -42,13 +42,14 @@ except FileNotFoundError:
     _DISCUSS_PROMPT_TPL = ""
 
 
-def _get_llm(temperature: float = 0.7) -> ChatDeepSeek:
-    """Create a DeepSeek LLM instance (reuses the same env config as main agent)."""
-    api_key = os.getenv("DEEPSEEK_API_KEY")
+def _get_llm(temperature: float = 0.7) -> ChatOpenAI:
+    """Create an LLM instance (reuses the same env config as main agent)."""
+    api_key = os.getenv("LLM_API_KEY")
     if not api_key:
-        raise ValueError("DEEPSEEK_API_KEY not found in environment variables.")
-    return ChatDeepSeek(
-        model="deepseek-chat",
+        raise ValueError("LLM_API_KEY not found in environment variables.")
+    return ChatOpenAI(
+        model=os.getenv("LLM_MODEL", "deepseek-chat"),
+        base_url=os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1"),
         api_key=api_key,
         temperature=temperature,
         max_tokens=1024,

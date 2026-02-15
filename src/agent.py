@@ -9,7 +9,7 @@ from langgraph.graph.message import add_messages
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 # Model related
-from langchain_deepseek import ChatDeepSeek
+from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -253,12 +253,15 @@ class MiniTimeAgent:
     # Model factory
     # ------------------------------------------------------------------
     @staticmethod
-    def _get_model() -> ChatDeepSeek:
-        api_key = os.getenv("DEEPSEEK_API_KEY")
+    def _get_model() -> ChatOpenAI:
+        api_key = os.getenv("LLM_API_KEY")
+        base_url = os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1")
+        model = os.getenv("LLM_MODEL", "deepseek-chat")
         if not api_key:
-            raise ValueError("未检测到 DEEPSEEK_API_KEY，请在环境变量中设置。")
-        return ChatDeepSeek(
-            model="deepseek-chat",
+            raise ValueError("未检测到 LLM_API_KEY，请在环境变量中设置。")
+        return ChatOpenAI(
+            model=model,
+            base_url=base_url,
             api_key=api_key,
             temperature=0.7,
             max_tokens=2048,
