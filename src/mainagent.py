@@ -120,6 +120,7 @@ class UserRequest(BaseModel):
     enabled_tools: Optional[list[str]] = None
     session_id: str = "default"
     images: Optional[list[str]] = None  # list of base64 data URIs
+    files: Optional[list[dict]] = None  # list of {name: str, content: str}
 
 class SystemTriggerRequest(BaseModel):
     user_id: str
@@ -139,23 +140,39 @@ class OasisAskRequest(BaseModel):
     user_id: str = "oasis_external"
 
 
-def _build_human_message(text: str, images: list[str] | None = None) -> HumanMessage:
-    """构造 HumanMessage，如果有图片则构造多模态 content list。
-    当 LLM_VISION_SUPPORT=false 时自动降级：丢弃图片并友好提示用户。
+def _build_human_message(text: str, images: list[str] | None = None, files: list[dict] | None = None) -> HumanMessage:
+    """构造 HumanMessage，支持图片（多模态）和文本文件附件。
+    - 图片：当 LLM_VISION_SUPPORT=true 时构造 OpenAI vision 格式；否则降级提示。
+    - 文本文件：将文件内容以 markdown 代码块形式拼接到消息文本中。
     """
     vision_supported = os.getenv("LLM_VISION_SUPPORT", "true").lower() == "true"
 
+    # 拼接文本文件内容到消息末尾
+    file_text = ""
+    if files:
+        file_parts = []
+        for f in files:
+            fname = f.get("name", "未知文件")
+            fcontent = f.get("content", "")
+            # 截断过大的文件内容（保护 token）
+            if len(fcontent) > 50000:
+                fcontent = fcontent[:50000] + f"\n\n... (文件过长，已截断，共 {len(f.get('content', ''))} 字符)"
+            file_parts.append(f"📄 **附件: {fname}**\n```\n{fcontent}\n```")
+        file_text = "\n\n" + "\n\n".join(file_parts)
+
+    combined_text = (text or "") + file_text
+
     if not images:
-        return HumanMessage(content=text)
+        return HumanMessage(content=combined_text or "(空消息)")
 
     if not vision_supported:
         hint = f"\n\n[系统提示：你发送了{len(images)}张图片，但当前模型不支持图片识别，图片已忽略。请切换到支持视觉的模型（如 gemini-2.0-flash、gpt-4o）后重试。]"
-        return HumanMessage(content=(text or "") + hint)
+        return HumanMessage(content=combined_text + hint)
 
     # 多模态：OpenAI vision 格式
     content_parts = []
-    if text:
-        content_parts.append({"type": "text", "text": text})
+    if combined_text:
+        content_parts.append({"type": "text", "text": combined_text})
     for img_data in images:
         content_parts.append({
             "type": "image_url",
@@ -189,7 +206,7 @@ async def ask_agent(req: UserRequest):
     thread_id = f"{req.user_id}#{req.session_id}"
     config = {"configurable": {"thread_id": thread_id}}
     user_input = {
-        "messages": [_build_human_message(req.text, req.images)],
+        "messages": [_build_human_message(req.text, req.images, req.files)],
         "trigger_source": "user",
         "enabled_tools": req.enabled_tools,
         "user_id": req.user_id,
@@ -213,7 +230,7 @@ async def ask_agent_stream(req: UserRequest):
     thread_id = f"{req.user_id}#{req.session_id}"
     config = {"configurable": {"thread_id": thread_id}}
     user_input = {
-        "messages": [_build_human_message(req.text, req.images)],
+        "messages": [_build_human_message(req.text, req.images, req.files)],
         "trigger_source": "user",
         "enabled_tools": req.enabled_tools,
         "user_id": req.user_id,

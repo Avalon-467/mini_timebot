@@ -284,6 +284,12 @@ HTML_TEMPLATE = """
         .image-upload-btn { cursor: pointer; color: #6b7280; transition: color 0.2s; flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 42px; height: 42px; border-radius: 10px; border: 1px solid #e5e7eb; background: #f9fafb; }
         .image-upload-btn:hover { color: #2563eb; border-color: #bfdbfe; background: #eff6ff; }
         @media (max-width: 768px) { .image-upload-btn { width: 36px; height: 36px; } }
+        /* File preview (text files) */
+        .file-preview-item { position: relative; display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 8px; border: 1px solid #e5e7eb; background: #f9fafb; font-size: 12px; color: #374151; max-width: 180px; }
+        .file-preview-item .file-icon { font-size: 16px; flex-shrink: 0; }
+        .file-preview-item .file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .file-preview-item .remove-btn { width: 16px; height: 16px; background: #ef4444; color: white; border: none; border-radius: 50%; font-size: 9px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; flex-shrink: 0; }
+        .chat-file-tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; background: rgba(255,255,255,0.15); font-size: 12px; margin-bottom: 4px; }
         /* Inline image in chat messages */
         .chat-inline-image { max-width: 240px; max-height: 180px; border-radius: 8px; margin: 4px 0; cursor: pointer; }
         .chat-inline-image:hover { opacity: 0.9; }
@@ -402,15 +408,16 @@ HTML_TEMPLATE = """
                     </div>
                 </div>
                 <div id="image-preview-area" class="image-preview-area" style="display:none;"></div>
+                <div id="file-preview-area" class="image-preview-area" style="display:none;"></div>
                 <div class="flex items-end space-x-2 sm:space-x-3">
-                    <label class="image-upload-btn" title="上传图片">
+                    <label class="image-upload-btn" title="上传图片/文件">
                         📎
-                        <input type="file" id="image-input" accept="image/*" multiple style="display:none;" onchange="handleImageSelect(event)">
+                        <input type="file" id="image-input" accept="image/*,.txt,.md,.csv,.json,.xml,.yaml,.yml,.log,.py,.js,.ts,.html,.css,.java,.c,.cpp,.h,.go,.rs,.sh,.bat,.ini,.toml,.cfg,.conf,.sql,.r,.rb" multiple style="display:none;" onchange="handleFileSelect(event)">
                     </label>
                     <div class="flex-grow">
                         <textarea id="user-input" rows="1" 
                             class="w-full p-2 sm:p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none transition-all text-sm sm:text-base"
-                            placeholder="输入指令...（可粘贴/上传图片）"></textarea>
+                            placeholder="输入指令...（可粘贴图片/上传文件）"></textarea>
                     </div>
                     <button onclick="handleSend()" id="send-btn"
                         class="bg-blue-600 hover:bg-blue-700 text-white px-4 sm:px-6 py-2 sm:py-3 rounded-xl transition-all font-bold shadow-lg h-[42px] sm:h-[50px] text-sm sm:text-base flex-shrink-0">
@@ -515,20 +522,35 @@ HTML_TEMPLATE = """
         let currentSessionId = null;
         let currentAbortController = null;
         let pendingImages = []; // [{base64: "data:image/...", name: "file.jpg"}, ...]
+        let pendingFiles = [];  // [{name: "data.csv", content: "...(text content)"}, ...]
+        const TEXT_EXTENSIONS = new Set(['.txt','.md','.csv','.json','.xml','.yaml','.yml','.log','.py','.js','.ts','.html','.css','.java','.c','.cpp','.h','.go','.rs','.sh','.bat','.ini','.toml','.cfg','.conf','.sql','.r','.rb']);
+        const MAX_FILE_SIZE = 512 * 1024; // 512KB per text file
 
-        // ===== Image Upload Logic =====
-        function handleImageSelect(event) {
+        // ===== File Upload Logic (images + text files) =====
+        function handleFileSelect(event) {
             const files = event.target.files;
             if (!files.length) return;
             for (const file of files) {
-                if (!file.type.startsWith('image/')) continue;
-                if (pendingImages.length >= 5) { alert('最多上传5张图片'); break; }
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    pendingImages.push({ base64: e.target.result, name: file.name });
-                    renderImagePreviews();
-                };
-                reader.readAsDataURL(file);
+                if (file.type.startsWith('image/')) {
+                    if (pendingImages.length >= 5) { alert('最多上传5张图片'); break; }
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        pendingImages.push({ base64: e.target.result, name: file.name });
+                        renderImagePreviews();
+                    };
+                    reader.readAsDataURL(file);
+                } else {
+                    const ext = '.' + file.name.split('.').pop().toLowerCase();
+                    if (!TEXT_EXTENSIONS.has(ext)) { alert(`不支持的文件类型: ${ext}\n支持: txt, md, csv, json, py, js 等文本文件`); continue; }
+                    if (file.size > MAX_FILE_SIZE) { alert(`文件 ${file.name} 过大（${(file.size/1024).toFixed(0)}KB），上限 512KB`); continue; }
+                    if (pendingFiles.length >= 3) { alert('最多上传3个文本文件'); break; }
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        pendingFiles.push({ name: file.name, content: e.target.result });
+                        renderFilePreviews();
+                    };
+                    reader.readAsText(file);
+                }
             }
             event.target.value = '';
         }
@@ -555,6 +577,11 @@ HTML_TEMPLATE = """
             renderImagePreviews();
         }
 
+        function removeFile(index) {
+            pendingFiles.splice(index, 1);
+            renderFilePreviews();
+        }
+
         function renderImagePreviews() {
             const area = document.getElementById('image-preview-area');
             if (pendingImages.length === 0) {
@@ -567,6 +594,23 @@ HTML_TEMPLATE = """
                 <div class="image-preview-item">
                     <img src="${img.base64}" alt="${img.name}">
                     <button class="remove-btn" onclick="removeImage(${i})">&times;</button>
+                </div>
+            `).join('');
+        }
+
+        function renderFilePreviews() {
+            const area = document.getElementById('file-preview-area');
+            if (pendingFiles.length === 0) {
+                area.style.display = 'none';
+                area.innerHTML = '';
+                return;
+            }
+            area.style.display = 'flex';
+            area.innerHTML = pendingFiles.map((f, i) => `
+                <div class="file-preview-item">
+                    <span class="file-icon">📄</span>
+                    <span class="file-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
+                    <button class="remove-btn" onclick="removeFile(${i})">&times;</button>
                 </div>
             `).join('');
         }
@@ -963,16 +1007,21 @@ HTML_TEMPLATE = """
             } catch(e) { /* ignore */ }
         }
 
-        function appendMessage(content, isUser = false, images = []) {
+        function appendMessage(content, isUser = false, images = [], fileNames = []) {
             const wrapper = document.createElement('div');
             wrapper.className = `flex ${isUser ? 'justify-end' : 'justify-start'} animate-in fade-in duration-300`;
             const div = document.createElement('div');
             div.className = `p-4 max-w-[85%] shadow-sm ${isUser ? 'bg-blue-600 text-white message-user' : 'bg-white border text-gray-800 message-agent'}`;
             if (isUser) {
-                // Show images first if any
+                let extraHtml = '';
                 if (images && images.length > 0) {
-                    const imgHtml = images.map(src => `<img src="${src}" class="chat-inline-image">`).join('');
-                    div.innerHTML = imgHtml + '<div style="margin-top:6px">' + escapeHtml(content) + '</div>';
+                    extraHtml += images.map(src => `<img src="${src}" class="chat-inline-image">`).join('');
+                }
+                if (fileNames && fileNames.length > 0) {
+                    extraHtml += fileNames.map(n => `<div class="chat-file-tag">📄 ${escapeHtml(n)}</div>`).join('');
+                }
+                if (extraHtml) {
+                    div.innerHTML = extraHtml + '<div style="margin-top:6px">' + escapeHtml(content) + '</div>';
                 } else {
                     div.innerText = content;
                 }
@@ -1001,18 +1050,22 @@ HTML_TEMPLATE = """
 
         async function handleSend() {
             const text = inputField.value.trim();
-            if (!text && pendingImages.length === 0) return;
+            if (!text && pendingImages.length === 0 && pendingFiles.length === 0) return;
             if (sendBtn.disabled) return;
 
-            // Capture images before clearing
+            // Capture images and files before clearing
             const imagesToSend = pendingImages.map(img => img.base64);
             const imagePreviewSrcs = [...imagesToSend];
+            const filesToSend = pendingFiles.map(f => ({ name: f.name, content: f.content }));
+            const fileNames = pendingFiles.map(f => f.name);
 
-            appendMessage(text || '(图片)', true, imagePreviewSrcs);
+            appendMessage(text || (imagePreviewSrcs.length ? '(图片)' : '(文件)'), true, imagePreviewSrcs, fileNames);
             inputField.value = '';
             inputField.style.height = 'auto';
             pendingImages = [];
+            pendingFiles = [];
             renderImagePreviews();
+            renderFilePreviews();
             sendBtn.disabled = true;
             showTyping();
 
@@ -1026,6 +1079,9 @@ HTML_TEMPLATE = """
                 const payload = { content: text, enabled_tools: getEnabledTools(), session_id: currentSessionId };
                 if (imagesToSend.length > 0) {
                     payload.images = imagesToSend;
+                }
+                if (filesToSend.length > 0) {
+                    payload.files = filesToSend;
                 }
                 const response = await fetch("/proxy_ask_stream", {
                     method: 'POST',
@@ -1779,6 +1835,7 @@ def proxy_ask_stream():
     enabled_tools = request.json.get("enabled_tools")  # None or list
     session_id = request.json.get("session_id", "default")
     images = request.json.get("images")  # None or list of base64 strings
+    files = request.json.get("files")    # None or list of {name, content}
     payload = {
         "user_id": user_id,
         "password": password,
@@ -1788,6 +1845,8 @@ def proxy_ask_stream():
     }
     if images:
         payload["images"] = images
+    if files:
+        payload["files"] = files
 
     try:
         r = requests.post(LOCAL_AGENT_STREAM_URL, json=payload, stream=True, timeout=120)
