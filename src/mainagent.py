@@ -3,6 +3,7 @@ import json
 import hashlib
 import asyncio
 import secrets
+import base64
 from contextlib import asynccontextmanager
 
 import aiosqlite
@@ -140,40 +141,118 @@ class OasisAskRequest(BaseModel):
     user_id: str = "oasis_external"
 
 
+def _decode_pdf_data_uri(data_uri: str) -> bytes:
+    """从 base64 data URI 解码出 PDF 字节。"""
+    if "," in data_uri:
+        data_uri = data_uri.split(",", 1)[1]
+    return base64.b64decode(data_uri)
+
+
+def _extract_pdf_text(data_uri: str) -> str:
+    """从 base64 data URI 中提取 PDF 文本内容（纯文本模式）。"""
+    try:
+        import fitz  # pymupdf
+        pdf_bytes = _decode_pdf_data_uri(data_uri)
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        pages = []
+        for i, page in enumerate(doc):
+            text = page.get_text()
+            if text.strip():
+                pages.append(f"--- 第{i+1}页 ---\n{text.strip()}")
+        doc.close()
+        if not pages:
+            return "(PDF 未提取到文本内容，可能是扫描件/纯图片 PDF)"
+        return "\n\n".join(pages)
+    except ImportError:
+        return "(服务端未安装 pymupdf，无法解析 PDF。请运行: pip install pymupdf)"
+    except Exception as e:
+        return f"(PDF 解析失败: {str(e)})"
+
+
+def _pdf_to_base64_images(data_uri: str, dpi: int = 150) -> list[str]:
+    """将 PDF 每页渲染为图片，返回 base64 data URI 列表（视觉模式）。
+    dpi 控制渲染清晰度，150 在质量和大小间取得平衡。
+    """
+    import fitz  # pymupdf
+    pdf_bytes = _decode_pdf_data_uri(data_uri)
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    image_list = []
+    zoom = dpi / 72.0
+    mat = fitz.Matrix(zoom, zoom)
+    for page in doc:
+        pix = page.get_pixmap(matrix=mat)
+        img_bytes = pix.tobytes("png")
+        b64 = base64.b64encode(img_bytes).decode("ascii")
+        image_list.append(f"data:image/png;base64,{b64}")
+    doc.close()
+    return image_list
+
+
 def _build_human_message(text: str, images: list[str] | None = None, files: list[dict] | None = None) -> HumanMessage:
-    """构造 HumanMessage，支持图片（多模态）和文本文件附件。
+    """构造 HumanMessage，支持图片（多模态）和文件附件（文本/PDF）。
     - 图片：当 LLM_VISION_SUPPORT=true 时构造 OpenAI vision 格式；否则降级提示。
     - 文本文件：将文件内容以 markdown 代码块形式拼接到消息文本中。
+    - PDF 文件：
+        * 视觉模式 (LLM_VISION_SUPPORT=true)：每页渲染为图片，走多模态（支持扫描件）
+        * 非视觉模式：pymupdf 提取纯文本，以代码块拼接
     """
     vision_supported = os.getenv("LLM_VISION_SUPPORT", "true").lower() == "true"
 
-    # 拼接文本文件内容到消息末尾
+    # 收集 PDF 生成的图片（视觉模式下）
+    pdf_images: list[str] = []
+
+    # 拼接文件内容到消息末尾
     file_text = ""
     if files:
         file_parts = []
         for f in files:
             fname = f.get("name", "未知文件")
+            ftype = f.get("type", "text")
             fcontent = f.get("content", "")
-            # 截断过大的文件内容（保护 token）
-            if len(fcontent) > 50000:
-                fcontent = fcontent[:50000] + f"\n\n... (文件过长，已截断，共 {len(f.get('content', ''))} 字符)"
-            file_parts.append(f"📄 **附件: {fname}**\n```\n{fcontent}\n```")
-        file_text = "\n\n" + "\n\n".join(file_parts)
+
+            if ftype == "pdf":
+                # 始终提取文本
+                pdf_text = _extract_pdf_text(fcontent)
+                if len(pdf_text) > 50000:
+                    pdf_text = pdf_text[:50000] + f"\n\n... (文件过长，已截断)"
+
+                if vision_supported:
+                    # 视觉模式：PDF 每页转为图片 + 文本
+                    try:
+                        page_images = _pdf_to_base64_images(fcontent)
+                        pdf_images.extend(page_images)
+                        file_parts.append(f"📄 **附件: {fname}** (共{len(page_images)}页，已转为图片供视觉分析，同时附上提取的文本)\n```\n{pdf_text}\n```")
+                    except Exception as e:
+                        file_parts.append(f"📄 **附件: {fname}** (视觉转换失败，降级为纯文本)\n```\n{pdf_text}\n```")
+                else:
+                    # 非视觉模式：仅文本
+                    file_parts.append(f"📄 **附件: {fname}**\n```\n{pdf_text}\n```")
+            else:
+                # 普通文本文件
+                if len(fcontent) > 50000:
+                    fcontent = fcontent[:50000] + f"\n\n... (文件过长，已截断，共 {len(f.get('content', ''))} 字符)"
+                file_parts.append(f"📄 **附件: {fname}**\n```\n{fcontent}\n```")
+
+        if file_parts:
+            file_text = "\n\n" + "\n\n".join(file_parts)
 
     combined_text = (text or "") + file_text
 
-    if not images:
+    # 合并所有图片（用户上传的 + PDF 转出的）
+    all_images = list(images or []) + pdf_images
+
+    if not all_images:
         return HumanMessage(content=combined_text or "(空消息)")
 
     if not vision_supported:
-        hint = f"\n\n[系统提示：你发送了{len(images)}张图片，但当前模型不支持图片识别，图片已忽略。请切换到支持视觉的模型（如 gemini-2.0-flash、gpt-4o）后重试。]"
+        hint = f"\n\n[系统提示：你发送了{len(images or [])}张图片，但当前模型不支持图片识别，图片已忽略。请切换到支持视觉的模型（如 gemini-2.0-flash、gpt-4o）后重试。]"
         return HumanMessage(content=combined_text + hint)
 
     # 多模态：OpenAI vision 格式
     content_parts = []
     if combined_text:
         content_parts.append({"type": "text", "text": combined_text})
-    for img_data in images:
+    for img_data in all_images:
         content_parts.append({
             "type": "image_url",
             "image_url": {"url": img_data},

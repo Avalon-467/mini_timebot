@@ -412,7 +412,7 @@ HTML_TEMPLATE = """
                 <div class="flex items-end space-x-2 sm:space-x-3">
                     <label class="image-upload-btn" title="上传图片/文件">
                         📎
-                        <input type="file" id="image-input" accept="image/*,.txt,.md,.csv,.json,.xml,.yaml,.yml,.log,.py,.js,.ts,.html,.css,.java,.c,.cpp,.h,.go,.rs,.sh,.bat,.ini,.toml,.cfg,.conf,.sql,.r,.rb" multiple style="display:none;" onchange="handleFileSelect(event)">
+                        <input type="file" id="image-input" accept="image/*,.pdf,.txt,.md,.csv,.json,.xml,.yaml,.yml,.log,.py,.js,.ts,.html,.css,.java,.c,.cpp,.h,.go,.rs,.sh,.bat,.ini,.toml,.cfg,.conf,.sql,.r,.rb" multiple style="display:none;" onchange="handleFileSelect(event)">
                     </label>
                     <div class="flex-grow">
                         <textarea id="user-input" rows="1" 
@@ -525,8 +525,9 @@ HTML_TEMPLATE = """
         let pendingFiles = [];  // [{name: "data.csv", content: "...(text content)"}, ...]
         const TEXT_EXTENSIONS = new Set(['.txt','.md','.csv','.json','.xml','.yaml','.yml','.log','.py','.js','.ts','.html','.css','.java','.c','.cpp','.h','.go','.rs','.sh','.bat','.ini','.toml','.cfg','.conf','.sql','.r','.rb']);
         const MAX_FILE_SIZE = 512 * 1024; // 512KB per text file
+        const MAX_PDF_SIZE = 10 * 1024 * 1024; // 10MB per PDF
 
-        // ===== File Upload Logic (images + text files) =====
+        // ===== File Upload Logic (images + text files + PDF) =====
         function handleFileSelect(event) {
             const files = event.target.files;
             if (!files.length) return;
@@ -539,14 +540,23 @@ HTML_TEMPLATE = """
                         renderImagePreviews();
                     };
                     reader.readAsDataURL(file);
-                } else {
-                    const ext = '.' + file.name.split('.').pop().toLowerCase();
-                    if (!TEXT_EXTENSIONS.has(ext)) { alert(`不支持的文件类型: ${ext}\n支持: txt, md, csv, json, py, js 等文本文件`); continue; }
-                    if (file.size > MAX_FILE_SIZE) { alert(`文件 ${file.name} 过大（${(file.size/1024).toFixed(0)}KB），上限 512KB`); continue; }
-                    if (pendingFiles.length >= 3) { alert('最多上传3个文本文件'); break; }
+                } else if (file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf') {
+                    if (file.size > MAX_PDF_SIZE) { alert(`PDF ${file.name} 过大（${(file.size/1024/1024).toFixed(1)}MB），上限 10MB`); continue; }
+                    if (pendingFiles.length >= 3) { alert('最多上传3个文件'); break; }
                     const reader = new FileReader();
                     reader.onload = (e) => {
-                        pendingFiles.push({ name: file.name, content: e.target.result });
+                        pendingFiles.push({ name: file.name, content: e.target.result, type: 'pdf' });
+                        renderFilePreviews();
+                    };
+                    reader.readAsDataURL(file);
+                } else {
+                    const ext = '.' + file.name.split('.').pop().toLowerCase();
+                    if (!TEXT_EXTENSIONS.has(ext)) { alert(`不支持的文件类型: ${ext}\n支持: txt, md, csv, json, py, js, pdf 等`); continue; }
+                    if (file.size > MAX_FILE_SIZE) { alert(`文件 ${file.name} 过大（${(file.size/1024).toFixed(0)}KB），上限 512KB`); continue; }
+                    if (pendingFiles.length >= 3) { alert('最多上传3个文件'); break; }
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        pendingFiles.push({ name: file.name, content: e.target.result, type: 'text' });
                         renderFilePreviews();
                     };
                     reader.readAsText(file);
