@@ -95,15 +95,15 @@ class ExpertAgent:
                 f"当前论坛内容:\n{posts_text}\n\n"
                 "请以严格的 JSON 格式回复（不要包含 markdown 代码块标记，不要包含注释）:\n"
                 "{\n"
-                '  "reply_to": null,\n'
+                '  "reply_to": 2,\n'
                 '  "content": "你的观点（200字以内，观点鲜明）",\n'
                 '  "votes": [\n'
                 '    {"post_id": 1, "direction": "up"}\n'
                 "  ]\n"
                 "}\n\n"
                 "说明:\n"
-                "- reply_to: 如果要回复某个帖子，填其ID；否则填 null（发表新观点）\n"
-                "- content: 你的发言内容，要有独到见解\n"
+                "- reply_to: 如果论坛中已有其他人的帖子，你**必须**选择一个帖子ID进行回复；只有在论坛为空时才填 null\n"
+                "- content: 你的发言内容，要有独到见解，可以赞同、反驳或补充你所回复的帖子\n"
                 '- votes: 对其他帖子的投票列表，direction 只能是 "up" 或 "down"。如果没有要投票的帖子，填空列表 []\n'
             )
 
@@ -119,11 +119,18 @@ class ExpertAgent:
 
             result = json.loads(raw)
 
+            # 后处理：如果论坛已有帖子但 LLM 返回 reply_to=null，自动推断回复对象
+            reply_to = result.get("reply_to")
+            if reply_to is None and others:
+                # 选择最近一个其他人的帖子作为回复对象
+                reply_to = others[-1].id
+                print(f"  [OASIS] 🔧 {self.name} reply_to 为 null，自动设为 #{reply_to}")
+
             # Publish the post
             await forum.publish(
                 author=self.name,
                 content=result.get("content", "（发言内容为空）"),
-                reply_to=result.get("reply_to"),
+                reply_to=reply_to,
             )
 
             # Vote on others' posts

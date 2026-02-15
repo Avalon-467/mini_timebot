@@ -10,6 +10,7 @@ load_dotenv(dotenv_path=os.path.join(root_dir, "config", ".env"))
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB for image uploads
 
 # --- 配置区 ---
 PORT_AGENT = int(os.getenv("PORT_AGENT", "51200"))
@@ -274,6 +275,18 @@ HTML_TEMPLATE = """
         .mobile-menu-item + .mobile-menu-item { border-top: 1px solid #f3f4f6; }
         .oasis-divider { width: 1px; background: #e5e7eb; cursor: col-resize; flex-shrink: 0; }
         .oasis-divider:hover { background: #3b82f6; width: 3px; }
+
+        /* Image upload styles */
+        .image-preview-area { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+        .image-preview-item { position: relative; width: 60px; height: 60px; border-radius: 8px; overflow: hidden; border: 1px solid #e5e7eb; }
+        .image-preview-item img { width: 100%; height: 100%; object-fit: cover; }
+        .image-preview-item .remove-btn { position: absolute; top: -2px; right: -2px; width: 18px; height: 18px; background: #ef4444; color: white; border: none; border-radius: 50%; font-size: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; }
+        .image-upload-btn { cursor: pointer; color: #6b7280; transition: color 0.2s; flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 42px; height: 42px; border-radius: 10px; border: 1px solid #e5e7eb; background: #f9fafb; }
+        .image-upload-btn:hover { color: #2563eb; border-color: #bfdbfe; background: #eff6ff; }
+        @media (max-width: 768px) { .image-upload-btn { width: 36px; height: 36px; } }
+        /* Inline image in chat messages */
+        .chat-inline-image { max-width: 240px; max-height: 180px; border-radius: 8px; margin: 4px 0; cursor: pointer; }
+        .chat-inline-image:hover { opacity: 0.9; }
     </style>
 </head>
 <body class="bg-gray-100 font-sans leading-normal tracking-normal">
@@ -388,11 +401,16 @@ HTML_TEMPLATE = """
                         </div>
                     </div>
                 </div>
+                <div id="image-preview-area" class="image-preview-area" style="display:none;"></div>
                 <div class="flex items-end space-x-2 sm:space-x-3">
+                    <label class="image-upload-btn" title="上传图片">
+                        📎
+                        <input type="file" id="image-input" accept="image/*" multiple style="display:none;" onchange="handleImageSelect(event)">
+                    </label>
                     <div class="flex-grow">
                         <textarea id="user-input" rows="1" 
                             class="w-full p-2 sm:p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none transition-all text-sm sm:text-base"
-                            placeholder="输入指令..."></textarea>
+                            placeholder="输入指令...（可粘贴/上传图片）"></textarea>
                     </div>
                     <button onclick="handleSend()" id="send-btn"
                         class="bg-blue-600 hover:bg-blue-700 text-white px-4 sm:px-6 py-2 sm:py-3 rounded-xl transition-all font-bold shadow-lg h-[42px] sm:h-[50px] text-sm sm:text-base flex-shrink-0">
@@ -496,6 +514,62 @@ HTML_TEMPLATE = """
         let currentUserId = null;
         let currentSessionId = null;
         let currentAbortController = null;
+        let pendingImages = []; // [{base64: "data:image/...", name: "file.jpg"}, ...]
+
+        // ===== Image Upload Logic =====
+        function handleImageSelect(event) {
+            const files = event.target.files;
+            if (!files.length) return;
+            for (const file of files) {
+                if (!file.type.startsWith('image/')) continue;
+                if (pendingImages.length >= 5) { alert('最多上传5张图片'); break; }
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    pendingImages.push({ base64: e.target.result, name: file.name });
+                    renderImagePreviews();
+                };
+                reader.readAsDataURL(file);
+            }
+            event.target.value = '';
+        }
+
+        function handlePasteImage(event) {
+            const items = event.clipboardData?.items;
+            if (!items) return;
+            for (const item of items) {
+                if (!item.type.startsWith('image/')) continue;
+                event.preventDefault();
+                if (pendingImages.length >= 5) { alert('最多上传5张图片'); break; }
+                const file = item.getAsFile();
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    pendingImages.push({ base64: e.target.result, name: 'pasted_image.png' });
+                    renderImagePreviews();
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        function removeImage(index) {
+            pendingImages.splice(index, 1);
+            renderImagePreviews();
+        }
+
+        function renderImagePreviews() {
+            const area = document.getElementById('image-preview-area');
+            if (pendingImages.length === 0) {
+                area.style.display = 'none';
+                area.innerHTML = '';
+                return;
+            }
+            area.style.display = 'flex';
+            area.innerHTML = pendingImages.map((img, i) => `
+                <div class="image-preview-item">
+                    <img src="${img.base64}" alt="${img.name}">
+                    <button class="remove-btn" onclick="removeImage(${i})">&times;</button>
+                </div>
+            `).join('');
+        }
 
         // ===== Session (conversation) ID management =====
         function generateSessionId() {
@@ -629,10 +703,23 @@ HTML_TEMPLATE = """
 
                 for (const msg of data.messages) {
                     if (msg.role === 'user') {
+                        // 支持多模态历史消息（content 可能是 string 或 array）
+                        let textContent = '';
+                        let imagesHtml = '';
+                        if (typeof msg.content === 'string') {
+                            textContent = msg.content;
+                        } else if (Array.isArray(msg.content)) {
+                            for (const part of msg.content) {
+                                if (part.type === 'text') textContent = part.text || '';
+                                else if (part.type === 'image_url') {
+                                    imagesHtml += `<img src="${part.image_url.url}" class="chat-inline-image">`;
+                                }
+                            }
+                        }
                         chatBox.innerHTML += `
                             <div class="flex justify-end">
                                 <div class="message-user bg-blue-600 text-white p-4 max-w-[85%] shadow-sm">
-                                    ${escapeHtml(msg.content)}
+                                    ${imagesHtml}${imagesHtml ? '<div style="margin-top:6px">' : ''}${escapeHtml(textContent || '(图片)')}${imagesHtml ? '</div>' : ''}
                                 </div>
                             </div>`;
                     } else if (msg.role === 'tool') {
@@ -876,13 +963,19 @@ HTML_TEMPLATE = """
             } catch(e) { /* ignore */ }
         }
 
-        function appendMessage(content, isUser = false) {
+        function appendMessage(content, isUser = false, images = []) {
             const wrapper = document.createElement('div');
             wrapper.className = `flex ${isUser ? 'justify-end' : 'justify-start'} animate-in fade-in duration-300`;
             const div = document.createElement('div');
             div.className = `p-4 max-w-[85%] shadow-sm ${isUser ? 'bg-blue-600 text-white message-user' : 'bg-white border text-gray-800 message-agent'}`;
             if (isUser) {
-                div.innerText = content;
+                // Show images first if any
+                if (images && images.length > 0) {
+                    const imgHtml = images.map(src => `<img src="${src}" class="chat-inline-image">`).join('');
+                    div.innerHTML = imgHtml + '<div style="margin-top:6px">' + escapeHtml(content) + '</div>';
+                } else {
+                    div.innerText = content;
+                }
             } else {
                 div.className += " markdown-body";
                 div.innerHTML = marked.parse(content);
@@ -908,11 +1001,18 @@ HTML_TEMPLATE = """
 
         async function handleSend() {
             const text = inputField.value.trim();
-            if (!text || sendBtn.disabled) return;
+            if (!text && pendingImages.length === 0) return;
+            if (sendBtn.disabled) return;
 
-            appendMessage(text, true);
+            // Capture images before clearing
+            const imagesToSend = pendingImages.map(img => img.base64);
+            const imagePreviewSrcs = [...imagesToSend];
+
+            appendMessage(text || '(图片)', true, imagePreviewSrcs);
             inputField.value = '';
             inputField.style.height = 'auto';
+            pendingImages = [];
+            renderImagePreviews();
             sendBtn.disabled = true;
             showTyping();
 
@@ -923,10 +1023,14 @@ HTML_TEMPLATE = """
             let fullText = '';
 
             try {
+                const payload = { content: text, enabled_tools: getEnabledTools(), session_id: currentSessionId };
+                if (imagesToSend.length > 0) {
+                    payload.images = imagesToSend;
+                }
                 const response = await fetch("/proxy_ask_stream", {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ content: text, enabled_tools: getEnabledTools(), session_id: currentSessionId }),
+                    body: JSON.stringify(payload),
                     signal: currentAbortController.signal
                 });
 
@@ -1012,6 +1116,7 @@ HTML_TEMPLATE = """
         inputField.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
         });
+        inputField.addEventListener('paste', handlePasteImage);
 
         // ================================================================
         // ===== OASIS 讨论面板逻辑 =====
@@ -1643,12 +1748,15 @@ def proxy_ask():
         return jsonify({"error": "未登录"}), 401
 
     user_content = request.json.get("content")
+    images = request.json.get("images")
     
     payload = {
         "user_id": user_id,
         "password": password,
         "text": user_content
     }
+    if images:
+        payload["images"] = images
     
     try:
         r = requests.post(LOCAL_AGENT_URL, json=payload, timeout=120)
@@ -1670,6 +1778,7 @@ def proxy_ask_stream():
     user_content = request.json.get("content")
     enabled_tools = request.json.get("enabled_tools")  # None or list
     session_id = request.json.get("session_id", "default")
+    images = request.json.get("images")  # None or list of base64 strings
     payload = {
         "user_id": user_id,
         "password": password,
@@ -1677,6 +1786,8 @@ def proxy_ask_stream():
         "enabled_tools": enabled_tools,
         "session_id": session_id,
     }
+    if images:
+        payload["images"] = images
 
     try:
         r = requests.post(LOCAL_AGENT_STREAM_URL, json=payload, stream=True, timeout=120)

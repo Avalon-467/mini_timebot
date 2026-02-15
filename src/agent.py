@@ -346,7 +346,12 @@ class MiniTimeAgent:
         # 正常对话流程（用户和系统触发共用）
         if tool_status_prompt and len(history_messages) >= 1:
             last_msg = history_messages[-1]
-            augmented_content = f"[系统通知] {tool_status_prompt}\n\n---\n{last_msg.content}"
+            # 多模态消息 content 可能是 list，需要特殊处理
+            if isinstance(last_msg.content, list):
+                # 在多模态内容前插入工具状态通知文本
+                augmented_content = [{"type": "text", "text": f"[系统通知] {tool_status_prompt}\n\n---\n"}] + list(last_msg.content)
+            else:
+                augmented_content = f"[系统通知] {tool_status_prompt}\n\n---\n{last_msg.content}"
             augmented_msg = HumanMessage(content=augmented_content)
             input_messages = (
                 [SystemMessage(content=base_prompt)]

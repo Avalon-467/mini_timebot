@@ -119,6 +119,7 @@ class UserRequest(BaseModel):
     text: str
     enabled_tools: Optional[list[str]] = None
     session_id: str = "default"
+    images: Optional[list[str]] = None  # list of base64 data URIs
 
 class SystemTriggerRequest(BaseModel):
     user_id: str
@@ -136,6 +137,31 @@ class OasisAskRequest(BaseModel):
     topic: str = "未知议题"
     history: list[dict] = []
     user_id: str = "oasis_external"
+
+
+def _build_human_message(text: str, images: list[str] | None = None) -> HumanMessage:
+    """构造 HumanMessage，如果有图片则构造多模态 content list。
+    当 LLM_VISION_SUPPORT=false 时自动降级：丢弃图片并友好提示用户。
+    """
+    vision_supported = os.getenv("LLM_VISION_SUPPORT", "true").lower() == "true"
+
+    if not images:
+        return HumanMessage(content=text)
+
+    if not vision_supported:
+        hint = f"\n\n[系统提示：你发送了{len(images)}张图片，但当前模型不支持图片识别，图片已忽略。请切换到支持视觉的模型（如 gemini-2.0-flash、gpt-4o）后重试。]"
+        return HumanMessage(content=(text or "") + hint)
+
+    # 多模态：OpenAI vision 格式
+    content_parts = []
+    if text:
+        content_parts.append({"type": "text", "text": text})
+    for img_data in images:
+        content_parts.append({
+            "type": "image_url",
+            "image_url": {"url": img_data},
+        })
+    return HumanMessage(content=content_parts)
 
 
 # --- Routes ---
@@ -163,7 +189,7 @@ async def ask_agent(req: UserRequest):
     thread_id = f"{req.user_id}#{req.session_id}"
     config = {"configurable": {"thread_id": thread_id}}
     user_input = {
-        "messages": [HumanMessage(content=req.text)],
+        "messages": [_build_human_message(req.text, req.images)],
         "trigger_source": "user",
         "enabled_tools": req.enabled_tools,
         "user_id": req.user_id,
@@ -187,7 +213,7 @@ async def ask_agent_stream(req: UserRequest):
     thread_id = f"{req.user_id}#{req.session_id}"
     config = {"configurable": {"thread_id": thread_id}}
     user_input = {
-        "messages": [HumanMessage(content=req.text)],
+        "messages": [_build_human_message(req.text, req.images)],
         "trigger_source": "user",
         "enabled_tools": req.enabled_tools,
         "user_id": req.user_id,
@@ -323,7 +349,16 @@ async def list_sessions(req: SessionListRequest):
         msg_count = 0
         for m in msgs:
             if hasattr(m, "content") and type(m).__name__ == "HumanMessage":
-                content = m.content if isinstance(m.content, str) else str(m.content)
+                # 多模态 content 可能是 list，提取其中的文本部分
+                raw = m.content
+                if isinstance(raw, str):
+                    content = raw
+                elif isinstance(raw, list):
+                    content = " ".join(
+                        p.get("text", "") for p in raw if isinstance(p, dict) and p.get("type") == "text"
+                    ) or "(图片消息)"
+                else:
+                    content = str(raw)
                 # 跳过系统触发消息
                 if content.startswith("[系统触发]") or content.startswith("[外部学术会议邀请]"):
                     continue
@@ -363,7 +398,8 @@ async def get_session_history(req: SessionHistoryRequest):
     for m in msgs:
         msg_type = type(m).__name__
         if msg_type == "HumanMessage":
-            content = m.content if isinstance(m.content, str) else str(m.content)
+            # 多模态消息 content 可能是 list（含 text+image_url），直接透传
+            content = m.content
             result.append({"role": "user", "content": content})
         elif msg_type == "AIMessage":
             content = m.content if isinstance(m.content, str) else str(m.content)
