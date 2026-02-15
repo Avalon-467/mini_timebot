@@ -290,6 +290,18 @@ HTML_TEMPLATE = """
         .file-preview-item .file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .file-preview-item .remove-btn { width: 16px; height: 16px; background: #ef4444; color: white; border: none; border-radius: 50%; font-size: 9px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; flex-shrink: 0; }
         .chat-file-tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; background: rgba(255,255,255,0.15); font-size: 12px; margin-bottom: 4px; }
+        /* Audio recording button */
+        .audio-record-btn { cursor: pointer; color: #6b7280; transition: all 0.2s; flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 42px; height: 42px; border-radius: 10px; border: 1px solid #e5e7eb; background: #f9fafb; font-size: 18px; }
+        .audio-record-btn:hover { color: #dc2626; border-color: #fecaca; background: #fef2f2; }
+        .audio-record-btn.recording { color: #fff; background: #dc2626; border-color: #dc2626; animation: pulse-red 1.2s infinite; }
+        @keyframes pulse-red { 0%,100% { box-shadow: 0 0 0 0 rgba(220,38,38,0.4); } 50% { box-shadow: 0 0 0 8px rgba(220,38,38,0); } }
+        @media (max-width: 768px) { .audio-record-btn { width: 36px; height: 36px; font-size: 16px; } }
+        /* Audio preview */
+        .audio-preview-item { position: relative; display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 8px; border: 1px solid #e5e7eb; background: #fef2f2; font-size: 12px; color: #374151; max-width: 200px; }
+        .audio-preview-item .file-icon { font-size: 16px; flex-shrink: 0; }
+        .audio-preview-item .file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .audio-preview-item .remove-btn { width: 16px; height: 16px; background: #ef4444; color: white; border: none; border-radius: 50%; font-size: 9px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; flex-shrink: 0; }
+        .chat-audio-tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; background: rgba(255,255,255,0.15); font-size: 12px; margin-bottom: 4px; }
         /* Inline image in chat messages */
         .chat-inline-image { max-width: 240px; max-height: 180px; border-radius: 8px; margin: 4px 0; cursor: pointer; }
         .chat-inline-image:hover { opacity: 0.9; }
@@ -409,15 +421,17 @@ HTML_TEMPLATE = """
                 </div>
                 <div id="image-preview-area" class="image-preview-area" style="display:none;"></div>
                 <div id="file-preview-area" class="image-preview-area" style="display:none;"></div>
+                <div id="audio-preview-area" class="image-preview-area" style="display:none;"></div>
                 <div class="flex items-end space-x-2 sm:space-x-3">
-                    <label class="image-upload-btn" title="上传图片/文件">
+                    <label class="image-upload-btn" title="上传图片/文件/音频">
                         📎
-                        <input type="file" id="image-input" accept="image/*,.pdf,.txt,.md,.csv,.json,.xml,.yaml,.yml,.log,.py,.js,.ts,.html,.css,.java,.c,.cpp,.h,.go,.rs,.sh,.bat,.ini,.toml,.cfg,.conf,.sql,.r,.rb" multiple style="display:none;" onchange="handleFileSelect(event)">
+                        <input type="file" id="image-input" accept="image/*,.pdf,.txt,.md,.csv,.json,.xml,.yaml,.yml,.log,.py,.js,.ts,.html,.css,.java,.c,.cpp,.h,.go,.rs,.sh,.bat,.ini,.toml,.cfg,.conf,.sql,.r,.rb,.mp3,.wav,.ogg,.m4a,.webm,.flac,.aac" multiple style="display:none;" onchange="handleFileSelect(event)">
                     </label>
+                    <button id="record-btn" class="audio-record-btn" title="录音" onclick="toggleRecording()">🎤</button>
                     <div class="flex-grow">
                         <textarea id="user-input" rows="1" 
                             class="w-full p-2 sm:p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none transition-all text-sm sm:text-base"
-                            placeholder="输入指令...（可粘贴图片/上传文件）"></textarea>
+                            placeholder="输入指令...（可粘贴图片/上传文件/录音）"></textarea>
                     </div>
                     <button onclick="handleSend()" id="send-btn"
                         class="bg-blue-600 hover:bg-blue-700 text-white px-4 sm:px-6 py-2 sm:py-3 rounded-xl transition-all font-bold shadow-lg h-[42px] sm:h-[50px] text-sm sm:text-base flex-shrink-0">
@@ -523,11 +537,15 @@ HTML_TEMPLATE = """
         let currentAbortController = null;
         let pendingImages = []; // [{base64: "data:image/...", name: "file.jpg"}, ...]
         let pendingFiles = [];  // [{name: "data.csv", content: "...(text content)"}, ...]
+        let pendingAudios = []; // [{base64: "data:audio/...", name: "recording.wav", format: "wav"}, ...]
+        let isRecording = false;
         const TEXT_EXTENSIONS = new Set(['.txt','.md','.csv','.json','.xml','.yaml','.yml','.log','.py','.js','.ts','.html','.css','.java','.c','.cpp','.h','.go','.rs','.sh','.bat','.ini','.toml','.cfg','.conf','.sql','.r','.rb']);
+        const AUDIO_EXTENSIONS = new Set(['.mp3','.wav','.ogg','.m4a','.webm','.flac','.aac']);
         const MAX_FILE_SIZE = 512 * 1024; // 512KB per text file
         const MAX_PDF_SIZE = 10 * 1024 * 1024; // 10MB per PDF
+        const MAX_AUDIO_SIZE = 25 * 1024 * 1024; // 25MB per audio
 
-        // ===== File Upload Logic (images + text files + PDF) =====
+        // ===== File Upload Logic (images + text files + PDF + audio) =====
         function handleFileSelect(event) {
             const files = event.target.files;
             if (!files.length) return;
@@ -538,6 +556,17 @@ HTML_TEMPLATE = """
                     reader.onload = (e) => {
                         pendingImages.push({ base64: e.target.result, name: file.name });
                         renderImagePreviews();
+                    };
+                    reader.readAsDataURL(file);
+                } else if (file.type.startsWith('audio/') || AUDIO_EXTENSIONS.has('.' + file.name.split('.').pop().toLowerCase())) {
+                    if (file.size > MAX_AUDIO_SIZE) { alert(`音频 ${file.name} 过大（${(file.size/1024/1024).toFixed(1)}MB），上限 25MB`); continue; }
+                    if (pendingAudios.length >= 2) { alert('最多上传2个音频'); break; }
+                    const ext = file.name.split('.').pop().toLowerCase();
+                    const fmt = ({'mp3':'mp3','wav':'wav','ogg':'ogg','m4a':'m4a','webm':'webm','flac':'flac','aac':'aac'})[ext] || 'mp3';
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        pendingAudios.push({ base64: e.target.result, name: file.name, format: fmt });
+                        renderAudioPreviews();
                     };
                     reader.readAsDataURL(file);
                 } else if (file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf') {
@@ -551,7 +580,7 @@ HTML_TEMPLATE = """
                     reader.readAsDataURL(file);
                 } else {
                     const ext = '.' + file.name.split('.').pop().toLowerCase();
-                    if (!TEXT_EXTENSIONS.has(ext)) { alert(`不支持的文件类型: ${ext}\n支持: txt, md, csv, json, py, js, pdf 等`); continue; }
+                    if (!TEXT_EXTENSIONS.has(ext)) { alert(`不支持的文件类型: ${ext}\n支持: txt, md, csv, json, py, js, pdf, mp3, wav 等`); continue; }
                     if (file.size > MAX_FILE_SIZE) { alert(`文件 ${file.name} 过大（${(file.size/1024).toFixed(0)}KB），上限 512KB`); continue; }
                     if (pendingFiles.length >= 3) { alert('最多上传3个文件'); break; }
                     const reader = new FileReader();
@@ -563,6 +592,123 @@ HTML_TEMPLATE = """
                 }
             }
             event.target.value = '';
+        }
+
+        // ===== Audio Recording =====
+        async function toggleRecording() {
+            if (isRecording) {
+                stopRecording();
+            } else {
+                await startRecording();
+            }
+        }
+
+        // --- WAV 编码辅助函数 ---
+        function encodeWAV(samples, sampleRate) {
+            const buffer = new ArrayBuffer(44 + samples.length * 2);
+            const view = new DataView(buffer);
+            function writeString(offset, string) {
+                for (let i = 0; i < string.length; i++) view.setUint8(offset + i, string.charCodeAt(i));
+            }
+            writeString(0, 'RIFF');
+            view.setUint32(4, 36 + samples.length * 2, true);
+            writeString(8, 'WAVE');
+            writeString(12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true); // PCM
+            view.setUint16(22, 1, true); // mono
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true);
+            writeString(36, 'data');
+            view.setUint32(40, samples.length * 2, true);
+            for (let i = 0; i < samples.length; i++) {
+                const s = Math.max(-1, Math.min(1, samples[i]));
+                view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+            }
+            return new Blob([buffer], { type: 'audio/wav' });
+        }
+
+        let audioContext = null;
+        let audioSourceNode = null;
+        let audioProcessorNode = null;
+        let recordedSamples = [];
+
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                audioSourceNode = audioContext.createMediaStreamSource(stream);
+                audioProcessorNode = audioContext.createScriptProcessor(4096, 1, 1);
+                recordedSamples = [];
+                audioProcessorNode.onaudioprocess = (e) => {
+                    const data = e.inputBuffer.getChannelData(0);
+                    recordedSamples.push(new Float32Array(data));
+                };
+                audioSourceNode.connect(audioProcessorNode);
+                audioProcessorNode.connect(audioContext.destination);
+                isRecording = true;
+                document.getElementById('record-btn').classList.add('recording');
+                document.getElementById('record-btn').title = '点击停止录音';
+            } catch (err) {
+                alert('无法访问麦克风，请检查浏览器权限设置。' + '\\n' + err.message);
+            }
+        }
+
+        function stopRecording() {
+            if (!audioContext) return;
+            const stream = audioSourceNode.mediaStream;
+            audioProcessorNode.disconnect();
+            audioSourceNode.disconnect();
+            stream.getTracks().forEach(t => t.stop());
+            // 合并所有采样
+            let totalLen = 0;
+            for (const chunk of recordedSamples) totalLen += chunk.length;
+            const merged = new Float32Array(totalLen);
+            let offset = 0;
+            for (const chunk of recordedSamples) { merged.set(chunk, offset); offset += chunk.length; }
+            const sampleRate = audioContext.sampleRate;
+            audioContext.close();
+            audioContext = null;
+            audioSourceNode = null;
+            audioProcessorNode = null;
+            recordedSamples = [];
+            isRecording = false;
+            document.getElementById('record-btn').classList.remove('recording');
+            document.getElementById('record-btn').title = '录音';
+            const blob = encodeWAV(merged, sampleRate);
+            if (blob.size > MAX_AUDIO_SIZE) { alert('录音过长，上限 25MB'); return; }
+            if (pendingAudios.length >= 2) { alert('最多2个音频'); return; }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const ts = new Date().toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+                pendingAudios.push({ base64: e.target.result, name: `录音_${ts}.wav`, format: 'wav' });
+                renderAudioPreviews();
+            };
+            reader.readAsDataURL(blob);
+        }
+
+        function removeAudio(index) {
+            pendingAudios.splice(index, 1);
+            renderAudioPreviews();
+        }
+
+        function renderAudioPreviews() {
+            const area = document.getElementById('audio-preview-area');
+            if (pendingAudios.length === 0) {
+                area.style.display = 'none';
+                area.innerHTML = '';
+                return;
+            }
+            area.style.display = 'flex';
+            area.innerHTML = pendingAudios.map((a, i) => `
+                <div class="audio-preview-item">
+                    <span class="file-icon">🎤</span>
+                    <span class="file-name" title="${escapeHtml(a.name)}">${escapeHtml(a.name)}</span>
+                    <button class="remove-btn" onclick="removeAudio(${i})">&times;</button>
+                </div>
+            `).join('');
         }
 
         function handlePasteImage(event) {
@@ -1017,7 +1163,7 @@ HTML_TEMPLATE = """
             } catch(e) { /* ignore */ }
         }
 
-        function appendMessage(content, isUser = false, images = [], fileNames = []) {
+        function appendMessage(content, isUser = false, images = [], fileNames = [], audioNames = []) {
             const wrapper = document.createElement('div');
             wrapper.className = `flex ${isUser ? 'justify-end' : 'justify-start'} animate-in fade-in duration-300`;
             const div = document.createElement('div');
@@ -1029,6 +1175,9 @@ HTML_TEMPLATE = """
                 }
                 if (fileNames && fileNames.length > 0) {
                     extraHtml += fileNames.map(n => `<div class="chat-file-tag">📄 ${escapeHtml(n)}</div>`).join('');
+                }
+                if (audioNames && audioNames.length > 0) {
+                    extraHtml += audioNames.map(n => `<div class="chat-audio-tag">🎤 ${escapeHtml(n)}</div>`).join('');
                 }
                 if (extraHtml) {
                     div.innerHTML = extraHtml + '<div style="margin-top:6px">' + escapeHtml(content) + '</div>';
@@ -1060,22 +1209,30 @@ HTML_TEMPLATE = """
 
         async function handleSend() {
             const text = inputField.value.trim();
-            if (!text && pendingImages.length === 0 && pendingFiles.length === 0) return;
+            if (!text && pendingImages.length === 0 && pendingFiles.length === 0 && pendingAudios.length === 0) return;
             if (sendBtn.disabled) return;
 
-            // Capture images and files before clearing
+            // Stop recording if active
+            if (isRecording) stopRecording();
+
+            // Capture images, files, audios before clearing
             const imagesToSend = pendingImages.map(img => img.base64);
             const imagePreviewSrcs = [...imagesToSend];
-            const filesToSend = pendingFiles.map(f => ({ name: f.name, content: f.content }));
+            const filesToSend = pendingFiles.map(f => ({ name: f.name, content: f.content, type: f.type }));
             const fileNames = pendingFiles.map(f => f.name);
+            const audiosToSend = pendingAudios.map(a => ({ base64: a.base64, name: a.name, format: a.format }));
+            const audioNames = pendingAudios.map(a => a.name);
 
-            appendMessage(text || (imagePreviewSrcs.length ? '(图片)' : '(文件)'), true, imagePreviewSrcs, fileNames);
+            const label = text || (imagePreviewSrcs.length ? '(图片)' : audioNames.length ? '(语音)' : '(文件)');
+            appendMessage(label, true, imagePreviewSrcs, fileNames, audioNames);
             inputField.value = '';
             inputField.style.height = 'auto';
             pendingImages = [];
             pendingFiles = [];
+            pendingAudios = [];
             renderImagePreviews();
             renderFilePreviews();
+            renderAudioPreviews();
             sendBtn.disabled = true;
             showTyping();
 
@@ -1092,6 +1249,9 @@ HTML_TEMPLATE = """
                 }
                 if (filesToSend.length > 0) {
                     payload.files = filesToSend;
+                }
+                if (audiosToSend.length > 0) {
+                    payload.audios = audiosToSend;
                 }
                 const response = await fetch("/proxy_ask_stream", {
                     method: 'POST',
@@ -1846,6 +2006,7 @@ def proxy_ask_stream():
     session_id = request.json.get("session_id", "default")
     images = request.json.get("images")  # None or list of base64 strings
     files = request.json.get("files")    # None or list of {name, content}
+    audios = request.json.get("audios")  # None or list of {base64, name, format}
     payload = {
         "user_id": user_id,
         "password": password,
@@ -1857,6 +2018,8 @@ def proxy_ask_stream():
         payload["images"] = images
     if files:
         payload["files"] = files
+    if audios:
+        payload["audios"] = audios
 
     try:
         r = requests.post(LOCAL_AGENT_STREAM_URL, json=payload, stream=True, timeout=120)

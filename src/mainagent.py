@@ -122,6 +122,7 @@ class UserRequest(BaseModel):
     session_id: str = "default"
     images: Optional[list[str]] = None  # list of base64 data URIs
     files: Optional[list[dict]] = None  # list of {name: str, content: str}
+    audios: Optional[list[dict]] = None  # list of {base64: str, name: str, format: str}
 
 class SystemTriggerRequest(BaseModel):
     user_id: str
@@ -169,37 +170,20 @@ def _extract_pdf_text(data_uri: str) -> str:
         return f"(PDF 解析失败: {str(e)})"
 
 
-def _pdf_to_base64_images(data_uri: str, dpi: int = 150) -> list[str]:
-    """将 PDF 每页渲染为图片，返回 base64 data URI 列表（视觉模式）。
-    dpi 控制渲染清晰度，150 在质量和大小间取得平衡。
-    """
-    import fitz  # pymupdf
-    pdf_bytes = _decode_pdf_data_uri(data_uri)
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    image_list = []
-    zoom = dpi / 72.0
-    mat = fitz.Matrix(zoom, zoom)
-    for page in doc:
-        pix = page.get_pixmap(matrix=mat)
-        img_bytes = pix.tobytes("png")
-        b64 = base64.b64encode(img_bytes).decode("ascii")
-        image_list.append(f"data:image/png;base64,{b64}")
-    doc.close()
-    return image_list
 
-
-def _build_human_message(text: str, images: list[str] | None = None, files: list[dict] | None = None) -> HumanMessage:
-    """构造 HumanMessage，支持图片（多模态）和文件附件（文本/PDF）。
+def _build_human_message(text: str, images: list[str] | None = None, files: list[dict] | None = None, audios: list[dict] | None = None) -> HumanMessage:
+    """构造 HumanMessage，支持图片、文件附件（文本/PDF）和音频。
     - 图片：当 LLM_VISION_SUPPORT=true 时构造 OpenAI vision 格式；否则降级提示。
     - 文本文件：将文件内容以 markdown 代码块形式拼接到消息文本中。
     - PDF 文件：
-        * 视觉模式 (LLM_VISION_SUPPORT=true)：每页渲染为图片，走多模态（支持扫描件）
-        * 非视觉模式：pymupdf 提取纯文本，以代码块拼接
+        * 视觉模式：以 file content part 直传原始 PDF + 提取文本
+        * 非视觉模式：pymupdf 提取纯文本
+    - 音频：以 file content part 格式传入（data URI，兼容 OpenAI 代理）
     """
     vision_supported = os.getenv("LLM_VISION_SUPPORT", "true").lower() == "true"
 
-    # 收集 PDF 生成的图片（视觉模式下）
-    pdf_images: list[str] = []
+    # 收集需要以 file content part 传入的 PDF（视觉模式下）
+    pdf_file_parts: list[dict] = []
 
     # 拼接文件内容到消息末尾
     file_text = ""
@@ -211,21 +195,26 @@ def _build_human_message(text: str, images: list[str] | None = None, files: list
             fcontent = f.get("content", "")
 
             if ftype == "pdf":
-                # 始终提取文本
-                pdf_text = _extract_pdf_text(fcontent)
-                if len(pdf_text) > 50000:
-                    pdf_text = pdf_text[:50000] + f"\n\n... (文件过长，已截断)"
-
                 if vision_supported:
-                    # 视觉模式：PDF 每页转为图片 + 文本
-                    try:
-                        page_images = _pdf_to_base64_images(fcontent)
-                        pdf_images.extend(page_images)
-                        file_parts.append(f"📄 **附件: {fname}** (共{len(page_images)}页，已转为图片供视觉分析，同时附上提取的文本)\n```\n{pdf_text}\n```")
-                    except Exception as e:
-                        file_parts.append(f"📄 **附件: {fname}** (视觉转换失败，降级为纯文本)\n```\n{pdf_text}\n```")
+                    # 视觉模式：以 file content part 直传 PDF + 提取文本备用
+                    pdf_text = _extract_pdf_text(fcontent)
+                    if len(pdf_text) > 50000:
+                        pdf_text = pdf_text[:50000] + f"\n\n... (文件过长，已截断)"
+                    # 确保 data URI 格式正确
+                    pdf_data_uri = fcontent if fcontent.startswith("data:") else f"data:application/pdf;base64,{fcontent}"
+                    pdf_file_parts.append({
+                        "type": "file",
+                        "file": {
+                            "filename": fname,
+                            "file_data": pdf_data_uri,
+                        },
+                    })
+                    file_parts.append(f"📄 **附件: {fname}** (已上传原始 PDF 供分析，同时附上提取的文本)\n```\n{pdf_text}\n```")
                 else:
                     # 非视觉模式：仅文本
+                    pdf_text = _extract_pdf_text(fcontent)
+                    if len(pdf_text) > 50000:
+                        pdf_text = pdf_text[:50000] + f"\n\n... (文件过长，已截断)"
                     file_parts.append(f"📄 **附件: {fname}**\n```\n{pdf_text}\n```")
             else:
                 # 普通文本文件
@@ -238,25 +227,64 @@ def _build_human_message(text: str, images: list[str] | None = None, files: list
 
     combined_text = (text or "") + file_text
 
-    # 合并所有图片（用户上传的 + PDF 转出的）
-    all_images = list(images or []) + pdf_images
+    # 用户上传的图片
+    all_images = list(images or [])
 
-    if not all_images:
+    # 判断是否有多模态内容（图片、PDF file parts、音频）
+    has_multimodal = bool(all_images) or bool(pdf_file_parts) or bool(audios)
+
+    if not has_multimodal:
         return HumanMessage(content=combined_text or "(空消息)")
 
-    if not vision_supported:
+    if not vision_supported and all_images:
         hint = f"\n\n[系统提示：你发送了{len(images or [])}张图片，但当前模型不支持图片识别，图片已忽略。请切换到支持视觉的模型（如 gemini-2.0-flash、gpt-4o）后重试。]"
-        return HumanMessage(content=combined_text + hint)
+        combined_text = combined_text + hint
+        # 如果没有音频和 PDF file，直接返回纯文本
+        if not audios and not pdf_file_parts:
+            return HumanMessage(content=combined_text)
+        all_images = []  # 清空图片，但继续处理音频/PDF
 
-    # 多模态：OpenAI vision 格式
+    # 多模态：构造 content list
     content_parts = []
     if combined_text:
         content_parts.append({"type": "text", "text": combined_text})
+
+    # 图片：OpenAI vision 格式
     for img_data in all_images:
         content_parts.append({
             "type": "image_url",
             "image_url": {"url": img_data},
         })
+
+    # PDF 文件：以 file content part 直传
+    content_parts.extend(pdf_file_parts)
+
+    # 音频：以 file content part 格式传入（兼容 OpenAI 代理）
+    if audios:
+        # MIME type 映射
+        _audio_mime = {
+            "mp3": "audio/mp3", "wav": "audio/wav", "webm": "audio/webm",
+            "ogg": "audio/ogg", "flac": "audio/flac", "aac": "audio/aac",
+            "m4a": "audio/m4a", "mpeg": "audio/mpeg",
+        }
+        for audio in audios:
+            audio_b64 = audio.get("base64", "")
+            audio_fmt = audio.get("format", "webm")
+            audio_name = audio.get("name", f"recording.{audio_fmt}")
+            mime = _audio_mime.get(audio_fmt, f"audio/{audio_fmt}")
+            # 确保是完整的 data URI
+            if audio_b64.startswith("data:"):
+                file_data = audio_b64
+            else:
+                file_data = f"data:{mime};base64,{audio_b64}"
+            content_parts.append({
+                "type": "file",
+                "file": {
+                    "filename": audio_name,
+                    "file_data": file_data,
+                },
+            })
+
     return HumanMessage(content=content_parts)
 
 
@@ -285,7 +313,7 @@ async def ask_agent(req: UserRequest):
     thread_id = f"{req.user_id}#{req.session_id}"
     config = {"configurable": {"thread_id": thread_id}}
     user_input = {
-        "messages": [_build_human_message(req.text, req.images, req.files)],
+        "messages": [_build_human_message(req.text, req.images, req.files, req.audios)],
         "trigger_source": "user",
         "enabled_tools": req.enabled_tools,
         "user_id": req.user_id,
@@ -309,7 +337,7 @@ async def ask_agent_stream(req: UserRequest):
     thread_id = f"{req.user_id}#{req.session_id}"
     config = {"configurable": {"thread_id": thread_id}}
     user_input = {
-        "messages": [_build_human_message(req.text, req.images, req.files)],
+        "messages": [_build_human_message(req.text, req.images, req.files, req.audios)],
         "trigger_source": "user",
         "enabled_tools": req.enabled_tools,
         "user_id": req.user_id,
