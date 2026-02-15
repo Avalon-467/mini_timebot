@@ -39,6 +39,15 @@ base_url=${base_url:-https://api.deepseek.com/v1}
 read -p "请输入模型名称（回车默认 deepseek-chat）: " model_name
 model_name=${model_name:-deepseek-chat}
 
+read -p "请输入 TTS 模型名称（回车默认 gemini-2.5-flash-preview-tts，留空跳过 TTS）: " tts_model
+tts_model=${tts_model:-gemini-2.5-flash-preview-tts}
+
+tts_voice=""
+if [ -n "$tts_model" ]; then
+    read -p "请输入 TTS 语音（回车默认 charon）: " tts_voice
+    tts_voice=${tts_voice:-charon}
+fi
+
 # 如果已有 .env，只替换/追加 Key 相关行，保留其余配置（端口等）
 if [ -f "$ENV_FILE" ]; then
     # 更新 LLM_API_KEY
@@ -59,6 +68,22 @@ if [ -f "$ENV_FILE" ]; then
     else
         echo "LLM_MODEL=$model_name" >> "$ENV_FILE"
     fi
+    # 更新 TTS_MODEL
+    if [ -n "$tts_model" ]; then
+        if grep -q '^TTS_MODEL=' "$ENV_FILE"; then
+            sed -i'' -e "s|^TTS_MODEL=.*|TTS_MODEL=$tts_model|" "$ENV_FILE"
+        else
+            echo "TTS_MODEL=$tts_model" >> "$ENV_FILE"
+        fi
+    fi
+    # 更新 TTS_VOICE
+    if [ -n "$tts_voice" ]; then
+        if grep -q '^TTS_VOICE=' "$ENV_FILE"; then
+            sed -i'' -e "s|^TTS_VOICE=.*|TTS_VOICE=$tts_voice|" "$ENV_FILE"
+        else
+            echo "TTS_VOICE=$tts_voice" >> "$ENV_FILE"
+        fi
+    fi
 else
     # 首次创建：从模板复制再写入
     if [ -f "$EXAMPLE_FILE" ]; then
@@ -66,11 +91,19 @@ else
         sed -i'' -e "s|^LLM_API_KEY=.*|LLM_API_KEY=$api_key|" "$ENV_FILE"
         sed -i'' -e "s|^LLM_BASE_URL=.*|LLM_BASE_URL=$base_url|" "$ENV_FILE"
         sed -i'' -e "s|^LLM_MODEL=.*|LLM_MODEL=$model_name|" "$ENV_FILE"
+        if [ -n "$tts_model" ]; then
+            sed -i'' -e "s|^# TTS_MODEL=.*|TTS_MODEL=$tts_model|" "$ENV_FILE"
+        fi
+        if [ -n "$tts_voice" ]; then
+            sed -i'' -e "s|^# TTS_VOICE=.*|TTS_VOICE=$tts_voice|" "$ENV_FILE"
+        fi
     else
         cat > "$ENV_FILE" << EOF
 LLM_API_KEY=$api_key
 LLM_BASE_URL=$base_url
 LLM_MODEL=$model_name
+TTS_MODEL=$tts_model
+TTS_VOICE=$tts_voice
 EOF
     fi
 fi

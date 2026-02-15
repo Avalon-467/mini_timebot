@@ -9,6 +9,10 @@ __pycache__/
 # 环境变量配置（含密钥）
 config/.env
 
+test/*
+!test/chat.py
+!test/view_history.py
+
 # 但 .env.example 模板需要上传
 !config/.env.example
 

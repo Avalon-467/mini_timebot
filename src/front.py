@@ -21,6 +21,7 @@ LOCAL_LOGIN_URL = f"http://127.0.0.1:{PORT_AGENT}/login"
 LOCAL_TOOLS_URL = f"http://127.0.0.1:{PORT_AGENT}/tools"
 LOCAL_SESSIONS_URL = f"http://127.0.0.1:{PORT_AGENT}/sessions"
 LOCAL_SESSION_HISTORY_URL = f"http://127.0.0.1:{PORT_AGENT}/session_history"
+LOCAL_TTS_URL = f"http://127.0.0.1:{PORT_AGENT}/tts"
 INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "")
 
 # OASIS Forum proxy
@@ -138,6 +139,26 @@ HTML_TEMPLATE = """
         .markdown-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.9em; }
         .message-user { border-radius: 1.25rem 1.25rem 0.2rem 1.25rem; }
         .message-agent { border-radius: 1.25rem 1.25rem 1.25rem 0.2rem; }
+        /* TTS 朗读按钮 */
+        .tts-btn {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 3px 10px; margin-top: 8px;
+            background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 9999px;
+            font-size: 12px; color: #6b7280; cursor: pointer; user-select: none;
+            transition: all 0.2s ease;
+        }
+        .tts-btn:hover { background: #e5e7eb; color: #374151; }
+        .tts-btn.playing { background: #dbeafe; color: #2563eb; border-color: #93c5fd; }
+        .tts-btn.loading { opacity: 0.6; pointer-events: none; }
+        .tts-btn svg { width: 14px; height: 14px; }
+        .tts-btn .tts-spinner {
+            width: 14px; height: 14px; border: 2px solid #93c5fd;
+            border-top-color: transparent; border-radius: 50%;
+            animation: tts-spin 0.8s linear infinite; display: none;
+        }
+        .tts-btn.loading .tts-spinner { display: inline-block; }
+        .tts-btn.loading .tts-icon { display: none; }
+        @keyframes tts-spin { to { transform: rotate(360deg); } }
         .dot { width: 6px; height: 6px; background: #3b82f6; border-radius: 50%; animation: pulse 1.5s infinite; }
         @keyframes pulse { 0%, 100% { opacity: 0.3; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.2); } }
         /* Tool panel styles */
@@ -940,12 +961,20 @@ HTML_TEMPLATE = """
                         }
                         chatBox.innerHTML += `
                             <div class="flex justify-start">
-                                <div class="message-agent bg-white border p-4 max-w-[85%] shadow-sm text-gray-700 markdown-body">
+                                <div class="message-agent bg-white border p-4 max-w-[85%] shadow-sm text-gray-700 markdown-body" data-tts-ready="1">
                                     ${toolCallsHtml}${msg.content ? marked.parse(msg.content) : '<span class="text-gray-400 text-xs">(调用工具中...)</span>'}
                                 </div>
                             </div>`;
                     }
                 }
+                // 为历史 AI 消息添加朗读按钮
+                chatBox.querySelectorAll('[data-tts-ready="1"]').forEach(div => {
+                    div.removeAttribute('data-tts-ready');
+                    const ttsBtn = createTtsButton(() => div.innerText || div.textContent || '');
+                    div.appendChild(ttsBtn);
+                });
+                // 高亮代码块
+                chatBox.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
                 chatBox.scrollTop = chatBox.scrollHeight;
             } catch (e) {
                 chatBox.innerHTML = `
@@ -1163,6 +1192,107 @@ HTML_TEMPLATE = """
             } catch(e) { /* ignore */ }
         }
 
+        // ===== TTS 朗读功能 =====
+        let currentTtsAudio = null;
+        let currentTtsBtn = null;
+
+        function stripMarkdownForTTS(md) {
+            // 移除代码块（含内容）
+            let text = md.replace(/```[\\s\\S]*?```/g, '（代码省略）');
+            // 移除行内代码
+            text = text.replace(/`[^`]+`/g, '');
+            // 移除图片
+            text = text.replace(/!\\[.*?\\]\\(.*?\\)/g, '');
+            // 移除链接，保留文字
+            text = text.replace(/\\[([^\\]]+)\\]\\(.*?\\)/g, '$1');
+            // 移除标题标记
+            text = text.replace(/^#{1,6}\\s+/gm, '');
+            // 移除粗体/斜体标记
+            text = text.replace(/\\*{1,3}([^*]+)\\*{1,3}/g, '$1');
+            // 移除工具调用提示行
+            text = text.replace(/.*🔧.*调用工具.*\\n?/g, '');
+            text = text.replace(/.*✅.*工具执行完成.*\\n?/g, '');
+            // 清理多余空行
+            text = text.replace(/\\n{3,}/g, '\\n\\n').trim();
+            return text;
+        }
+
+        function stopTtsPlayback() {
+            if (currentTtsAudio) {
+                currentTtsAudio.pause();
+                currentTtsAudio.src = '';
+                currentTtsAudio = null;
+            }
+            if (currentTtsBtn) {
+                currentTtsBtn.classList.remove('playing', 'loading');
+                currentTtsBtn.querySelector('.tts-label').textContent = '朗读';
+                currentTtsBtn = null;
+            }
+        }
+
+        async function handleTTS(btn, text) {
+            // 如果点击的是正在播放的按钮，则停止
+            if (btn === currentTtsBtn && currentTtsAudio) {
+                stopTtsPlayback();
+                return;
+            }
+            // 停止上一个播放
+            stopTtsPlayback();
+
+            const cleanText = stripMarkdownForTTS(text);
+            if (!cleanText) return;
+
+            currentTtsBtn = btn;
+            btn.classList.add('loading');
+            btn.querySelector('.tts-label').textContent = '加载中...';
+
+            try {
+                const resp = await fetch('/proxy_tts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: cleanText })
+                });
+                if (!resp.ok) throw new Error('TTS 请求失败');
+
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const audio = new Audio(url);
+                currentTtsAudio = audio;
+
+                btn.classList.remove('loading');
+                btn.classList.add('playing');
+                btn.querySelector('.tts-label').textContent = '停止';
+
+                audio.onended = () => {
+                    URL.revokeObjectURL(url);
+                    stopTtsPlayback();
+                };
+                audio.onerror = () => {
+                    URL.revokeObjectURL(url);
+                    stopTtsPlayback();
+                };
+                audio.play();
+            } catch (e) {
+                console.error('TTS error:', e);
+                stopTtsPlayback();
+            }
+        }
+
+        function createTtsButton(textRef) {
+            const btn = document.createElement('div');
+            btn.className = 'tts-btn';
+            btn.innerHTML = `
+                <span class="tts-spinner"></span>
+                <svg class="tts-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+                </svg>
+                <span class="tts-label">朗读</span>`;
+            btn.onclick = () => handleTTS(btn, textRef());
+            return btn;
+        }
+
         function appendMessage(content, isUser = false, images = [], fileNames = [], audioNames = []) {
             const wrapper = document.createElement('div');
             wrapper.className = `flex ${isUser ? 'justify-end' : 'justify-start'} animate-in fade-in duration-300`;
@@ -1188,6 +1318,11 @@ HTML_TEMPLATE = """
                 div.className += " markdown-body";
                 div.innerHTML = marked.parse(content);
                 div.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
+                // AI 消息添加朗读按钮（content 非空时）
+                if (content) {
+                    const ttsBtn = createTtsButton(() => div.innerText || div.textContent || '');
+                    div.appendChild(ttsBtn);
+                }
             }
             wrapper.appendChild(div);
             chatBox.appendChild(wrapper);
@@ -1306,6 +1441,9 @@ HTML_TEMPLATE = """
                 if (fullText) {
                     agentDiv.innerHTML = marked.parse(fullText);
                     agentDiv.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
+                    // 流式结束后添加朗读按钮
+                    const ttsBtn = createTtsButton(() => agentDiv.innerText || agentDiv.textContent || '');
+                    agentDiv.appendChild(ttsBtn);
                     chatBox.scrollTop = chatBox.scrollHeight;
                 }
 
@@ -2057,6 +2195,35 @@ def proxy_cancel():
     try:
         r = requests.post(LOCAL_AGENT_CANCEL_URL, json={"user_id": user_id, "password": password, "session_id": session_id}, timeout=5)
         return jsonify(r.json())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/proxy_tts", methods=["POST"])
+def proxy_tts():
+    """代理 TTS 请求到后端 Agent，返回 mp3 音频流"""
+    user_id = session.get("user_id")
+    password = session.get("password")
+    if not user_id or not password:
+        return jsonify({"error": "未登录"}), 401
+
+    text = request.json.get("text", "")
+    voice = request.json.get("voice")
+    if not text.strip():
+        return jsonify({"error": "文本不能为空"}), 400
+
+    try:
+        payload = {"user_id": user_id, "password": password, "text": text}
+        if voice:
+            payload["voice"] = voice
+        r = requests.post(LOCAL_TTS_URL, json=payload, timeout=60)
+        if r.status_code != 200:
+            return jsonify({"error": f"TTS 服务错误: {r.status_code}"}), r.status_code
+
+        return Response(
+            r.content,
+            mimetype="audio/mpeg",
+            headers={"Content-Disposition": "inline; filename=tts_output.mp3"},
+        )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

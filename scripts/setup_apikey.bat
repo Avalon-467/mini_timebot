@@ -53,6 +53,12 @@ if "%BASE_URL%"=="" set "BASE_URL=https://api.deepseek.com/v1"
 set /p MODEL_NAME=请输入模型名称（回车默认 deepseek-chat）: 
 if "%MODEL_NAME%"=="" set "MODEL_NAME=deepseek-chat"
 
+set /p TTS_MODEL=请输入 TTS 模型名称（回车默认 gemini-2.5-flash-preview-tts）: 
+if "%TTS_MODEL%"=="" set "TTS_MODEL=gemini-2.5-flash-preview-tts"
+
+set /p TTS_VOICE=请输入 TTS 语音（回车默认 charon）: 
+if "%TTS_VOICE%"=="" set "TTS_VOICE=charon"
+
 :: 如果已有 .env，用 PowerShell 原地替换 Key，保留其余配置
 if exist "%ENV_FILE%" (
     :: 更新 LLM_API_KEY
@@ -76,6 +82,20 @@ if exist "%ENV_FILE%" (
     ) else (
         echo LLM_MODEL=%MODEL_NAME%>> "%ENV_FILE%"
     )
+    :: 更新 TTS_MODEL
+    findstr /i "^TTS_MODEL=" "%ENV_FILE%" >nul 2>&1
+    if %errorlevel%==0 (
+        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^TTS_MODEL=.*', 'TTS_MODEL=%TTS_MODEL%' | Set-Content '%ENV_FILE%'"
+    ) else (
+        echo TTS_MODEL=%TTS_MODEL%>> "%ENV_FILE%"
+    )
+    :: 更新 TTS_VOICE
+    findstr /i "^TTS_VOICE=" "%ENV_FILE%" >nul 2>&1
+    if %errorlevel%==0 (
+        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^TTS_VOICE=.*', 'TTS_VOICE=%TTS_VOICE%' | Set-Content '%ENV_FILE%'"
+    ) else (
+        echo TTS_VOICE=%TTS_VOICE%>> "%ENV_FILE%"
+    )
 ) else (
     :: 首次创建：从模板复制再写入
     if exist "%EXAMPLE_FILE%" (
@@ -83,11 +103,15 @@ if exist "%ENV_FILE%" (
         powershell -Command "(Get-Content '%ENV_FILE%') -replace '^LLM_API_KEY=.*', 'LLM_API_KEY=%API_KEY%' | Set-Content '%ENV_FILE%'"
         powershell -Command "(Get-Content '%ENV_FILE%') -replace '^LLM_BASE_URL=.*', 'LLM_BASE_URL=%BASE_URL%' | Set-Content '%ENV_FILE%'"
         powershell -Command "(Get-Content '%ENV_FILE%') -replace '^LLM_MODEL=.*', 'LLM_MODEL=%MODEL_NAME%' | Set-Content '%ENV_FILE%'"
+        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^# TTS_MODEL=.*', 'TTS_MODEL=%TTS_MODEL%' | Set-Content '%ENV_FILE%'"
+        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^# TTS_VOICE=.*', 'TTS_VOICE=%TTS_VOICE%' | Set-Content '%ENV_FILE%'"
     ) else (
         (
             echo LLM_API_KEY=%API_KEY%
             echo LLM_BASE_URL=%BASE_URL%
             echo LLM_MODEL=%MODEL_NAME%
+            echo TTS_MODEL=%TTS_MODEL%
+            echo TTS_VOICE=%TTS_VOICE%
         ) > "%ENV_FILE%"
     )
 )

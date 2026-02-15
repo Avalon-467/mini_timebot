@@ -7,6 +7,7 @@ import base64
 from contextlib import asynccontextmanager
 
 import aiosqlite
+import httpx
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -426,6 +427,72 @@ async def cancel_agent(req: CancelRequest):
     task_key = f"{req.user_id}#{req.session_id}"
     await agent.cancel_task(task_key)
     return {"status": "success", "message": "已终止"}
+
+
+# ------------------------------------------------------------------
+# TTS: 文本转语音
+# ------------------------------------------------------------------
+
+class TTSRequest(BaseModel):
+    user_id: str
+    password: str
+    text: str
+    voice: Optional[str] = None
+
+@app.post("/tts")
+async def text_to_speech(req: TTSRequest):
+    """将文本转为语音，返回 mp3 音频流"""
+    if not verify_password(req.user_id, req.password):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    tts_text = req.text.strip()
+    if not tts_text:
+        raise HTTPException(status_code=400, detail="文本不能为空")
+
+    # 限制长度，避免过长文本
+    if len(tts_text) > 4000:
+        tts_text = tts_text[:4000]
+
+    api_key = os.getenv("LLM_API_KEY", "")
+    base_url = os.getenv("LLM_BASE_URL", "").rstrip("/")
+    tts_model = os.getenv("TTS_MODEL", "gemini-2.5-flash-preview-tts")
+    tts_voice = req.voice or os.getenv("TTS_VOICE", "charon")
+
+    if not api_key or not base_url:
+        raise HTTPException(status_code=500, detail="TTS API 未配置")
+
+    tts_url = f"{base_url}/audio/speech"
+
+    async def audio_stream():
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            async with client.stream(
+                "POST",
+                tts_url,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": tts_model,
+                    "input": tts_text,
+                    "voice": tts_voice,
+                    "response_format": "mp3",
+                },
+            ) as resp:
+                if resp.status_code != 200:
+                    error_body = await resp.aread()
+                    raise HTTPException(
+                        status_code=resp.status_code,
+                        detail=f"TTS API 错误: {error_body.decode('utf-8', errors='replace')[:200]}",
+                    )
+                async for chunk in resp.aiter_bytes(chunk_size=4096):
+                    yield chunk
+
+    return StreamingResponse(
+        audio_stream(),
+        media_type="audio/mpeg",
+        headers={"Content-Disposition": "inline; filename=tts_output.mp3"},
+    )
 
 
 # ------------------------------------------------------------------

@@ -334,6 +334,10 @@ class MiniTimeAgent:
         # 每次进入前清理：移除末尾不完整的 tool_calls（有 AIMessage 带 tool_calls 但缺少 ToolMessage 回复）
         history_messages = self._sanitize_messages(history_messages)
 
+        # 清理所有消息中的多模态内容（file/image parts），只保留文本
+        # 避免旧的二进制附件在后续轮次反复发送给 LLM 导致上游 API 报错
+        history_messages = self._strip_multimodal_parts(history_messages)
+
         # 如果是系统触发，且最后一条不是 ToolMessage（非工具回调轮），给它加上系统触发说明
         is_system = state.get("trigger_source") == "system"
         if is_system and history_messages and isinstance(history_messages[-1], HumanMessage):
@@ -346,12 +350,7 @@ class MiniTimeAgent:
         # 正常对话流程（用户和系统触发共用）
         if tool_status_prompt and len(history_messages) >= 1:
             last_msg = history_messages[-1]
-            # 多模态消息 content 可能是 list，需要特殊处理
-            if isinstance(last_msg.content, list):
-                # 在多模态内容前插入工具状态通知文本
-                augmented_content = [{"type": "text", "text": f"[系统通知] {tool_status_prompt}\n\n---\n"}] + list(last_msg.content)
-            else:
-                augmented_content = f"[系统通知] {tool_status_prompt}\n\n---\n{last_msg.content}"
+            augmented_content = f"[系统通知] {tool_status_prompt}\n\n---\n{last_msg.content}"
             augmented_msg = HumanMessage(content=augmented_content)
             input_messages = (
                 [SystemMessage(content=base_prompt)]
@@ -391,6 +390,37 @@ class MiniTimeAgent:
                     continue
             break
         return clean
+
+    @staticmethod
+    def _strip_multimodal_parts(messages: list) -> list:
+        """
+        将所有 HumanMessage 中的多模态 content（list 格式）转为纯文本。
+        - type:"text" 的 part 保留文本
+        - type:"file" 替换为 "[用户上传了文件: {filename}]"
+        - type:"image_url" 替换为 "[用户上传了图片]"
+        - 其他未知 type 丢弃
+        """
+        result = []
+        for msg in messages:
+            if isinstance(msg, HumanMessage) and isinstance(msg.content, list):
+                text_parts = []
+                for part in msg.content:
+                    if not isinstance(part, dict):
+                        text_parts.append(str(part))
+                        continue
+                    ptype = part.get("type", "")
+                    if ptype == "text":
+                        text_parts.append(part.get("text", ""))
+                    elif ptype == "file":
+                        fname = part.get("file", {}).get("filename", "附件")
+                        text_parts.append(f"[用户上传了文件: {fname}]")
+                    elif ptype == "image_url":
+                        text_parts.append("[用户上传了图片]")
+                combined = "\n".join(t for t in text_parts if t)
+                result.append(HumanMessage(content=combined or "(空消息)"))
+            else:
+                result.append(msg)
+        return result
 
     def get_tools_info(self) -> list[dict]:
         """Return serializable tool metadata list."""
