@@ -338,30 +338,29 @@ HTML_TEMPLATE = """
     </div>
 
     <!-- Offline Banner -->
-    <div id="offline-banner">⚠️ 网络已断开，请检查连接</div>
+    <div id="offline-banner" data-i18n="offline_banner">⚠️ 网络已断开，请检查连接</div>
 
     <!-- ========== 登录页 ========== -->
     <div id="login-screen" class="min-h-screen flex items-center justify-center safe-top safe-bottom px-4" style="width:100%;height:100%;overflow:auto;">
         <div class="bg-white rounded-2xl shadow-2xl p-6 sm:p-8 w-full max-w-md border">
             <div class="flex items-center justify-center space-x-3 mb-6">
                 <div class="bg-blue-600 p-3 rounded-xl text-white font-bold text-2xl">X</div>
-                <h1 class="text-2xl font-bold text-gray-800">Xavier AnyControl</h1>
+                <h1 class="text-2xl font-bold text-gray-800" data-i18n="login_title">Xavier AnyControl</h1>
             </div>
-            <p class="text-center text-gray-500 text-sm mb-8">请登录以开始对话</p>
+            <p class="text-center text-gray-500 text-sm mb-8" data-i18n="login_subtitle">请登录以开始对话</p>
             <div class="space-y-4">
                 <input id="username-input" type="text" maxlength="32"
                     class="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-center text-lg"
-                    placeholder="用户名" autofocus>
+                    data-i18n-placeholder="username" placeholder="用户名" autofocus>
                 <input id="password-input" type="password" maxlength="64"
                     class="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-center text-lg"
-                    placeholder="密码">
+                    data-i18n-placeholder="password" placeholder="密码">
                 <div id="login-error" class="text-red-500 text-sm text-center hidden"></div>
                 <button onclick="handleLogin()" id="login-btn"
-                    class="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold text-lg transition-all shadow-lg">
-                    登录
-                </button>
+                    class="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold text-lg transition-all shadow-lg"
+                    data-i18n="login_btn">登录</button>
             </div>
-            <p class="text-xs text-gray-400 text-center mt-6">身份验证后方可使用，对话和文件按用户隔离</p>
+            <p class="text-xs text-gray-400 text-center mt-6" data-i18n="login_footer">身份验证后方可使用，对话和文件按用户隔离</p>
         </div>
     </div>
 
@@ -371,11 +370,11 @@ HTML_TEMPLATE = """
         <!-- ===== 历史会话侧边栏 ===== -->
         <div id="session-sidebar" class="session-sidebar" style="display:none;">
             <div class="p-3 border-b bg-gray-50 flex justify-between items-center flex-shrink-0">
-                <span class="text-sm font-bold text-gray-700">💬 历史对话</span>
+                <span class="text-sm font-bold text-gray-700" data-i18n="history_title">💬 历史对话</span>
                 <button onclick="closeSessionSidebar()" class="text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
             </div>
             <div id="session-list" class="flex-1 overflow-y-auto p-2 space-y-1">
-                <div class="text-xs text-gray-400 text-center py-4">加载中...</div>
+                <div class="text-xs text-gray-400 text-center py-4" data-i18n="loading">加载中...</div>
             </div>
         </div>
 
@@ -386,31 +385,32 @@ HTML_TEMPLATE = """
                     <div class="bg-blue-600 p-1.5 sm:p-2 rounded-lg text-white font-bold text-lg sm:text-xl">X</div>
                     <div>
                         <h1 class="text-sm sm:text-lg font-bold text-gray-800 leading-tight">AnyControl</h1>
-                        <p class="text-[10px] sm:text-xs text-green-500 flex items-center">● 已加密</p>
+                        <p class="text-[10px] sm:text-xs text-green-500 flex items-center" data-i18n="encrypted">● 已加密</p>
                     </div>
                 </div>
                 <div class="flex items-center space-x-1 sm:space-x-2 mobile-header-actions flex-shrink-0">
                     <div id="uid-display" class="text-xs sm:text-sm font-mono bg-gray-100 px-2 sm:px-3 py-1 rounded border truncate max-w-[80px] sm:max-w-none"></div>
-                    <div id="session-display" class="text-[10px] sm:text-xs font-mono bg-blue-50 text-blue-600 px-1.5 sm:px-2 py-1 rounded border border-blue-200 cursor-default" title="当前对话号"></div>
+                    <div id="session-display" class="text-[10px] sm:text-xs font-mono bg-blue-50 text-blue-600 px-1.5 sm:px-2 py-1 rounded border border-blue-200 cursor-default" data-i18n-title="current_session" title="当前对话号"></div>
                     <!-- History Button -->
-                    <button onclick="toggleSessionSidebar()" class="desktop-only-btn text-[10px] sm:text-xs bg-gray-50 text-gray-600 hover:bg-gray-100 px-2 py-1 rounded border border-gray-200 transition-colors flex items-center justify-center" title="历史对话">
-                        <span class="hidden sm:inline">📋历史</span>
+                    <button onclick="toggleSessionSidebar()" class="desktop-only-btn text-[10px] sm:text-xs bg-gray-50 text-gray-600 hover:bg-gray-100 px-2 py-1 rounded border border-gray-200 transition-colors flex items-center justify-center" data-i18n-title="history_title" title="历史对话">
+                        <span class="hidden sm:inline" data-i18n="history">📋历史</span>
                         <span class="sm:hidden text-base leading-none">📋</span>
                     </button>
                     <!-- New Session Button: Visible on all devices -->
-                    <button onclick="handleNewSession()" class="text-[10px] sm:text-xs bg-green-50 text-green-600 hover:bg-green-100 px-2 py-1 rounded border border-green-200 transition-colors mr-1 flex items-center justify-center" title="开启新对话">
+                    <button onclick="handleNewSession()" class="text-[10px] sm:text-xs bg-green-50 text-green-600 hover:bg-green-100 px-2 py-1 rounded border border-green-200 transition-colors mr-1 flex items-center justify-center" data-i18n-title="new_session_confirm" title="开启新对话">
                         <span class="sm:hidden text-base font-bold leading-none">+</span>
-                        <span class="hidden sm:inline">+新</span>
+                        <span class="hidden sm:inline" data-i18n="new_chat">+新</span>
                     </button>
-                    <button onclick="handleLogout()" class="desktop-only-btn text-[10px] sm:text-xs text-gray-400 hover:text-red-500 px-1.5 sm:px-2 py-1 rounded transition-colors" title="切换用户">退出</button>
+                    <button onclick="toggleLanguage()" id="lang-toggle-btn" class="text-[10px] sm:text-xs bg-purple-50 text-purple-600 hover:bg-purple-100 px-2 py-1 rounded border border-purple-200 transition-colors" title="Switch Language">EN</button>
+                    <button onclick="handleLogout()" class="desktop-only-btn text-[10px] sm:text-xs text-gray-400 hover:text-red-500 px-1.5 sm:px-2 py-1 rounded transition-colors" data-i18n="logout" data-i18n-title="logout" title="切换用户">退出</button>
                     <!-- Mobile: hamburger menu -->
                     <div class="mobile-menu-wrapper" style="position:relative;">
-                        <button onclick="toggleMobileMenu()" class="mobile-menu-btn text-[10px] bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded border border-gray-300 transition-colors" title="更多操作">⋮</button>
+                        <button onclick="toggleMobileMenu()" class="mobile-menu-btn text-[10px] bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded border border-gray-300 transition-colors" data-i18n-title="more_actions" title="更多操作">⋮</button>
                         <div id="mobile-menu-dropdown" class="mobile-menu-dropdown" style="display:none;">
-                            <button onclick="toggleSessionSidebar(); closeMobileMenu();" class="mobile-menu-item">📋 历史对话</button>
-                            <button onclick="handleNewSession(); closeMobileMenu();" class="mobile-menu-item">➕ 新对话</button>
-                            <button onclick="toggleOasisMobile(); closeMobileMenu();" class="mobile-menu-item">🏛️ OASIS</button>
-                            <button onclick="handleLogout(); closeMobileMenu();" class="mobile-menu-item text-red-500">🚪 退出</button>
+                            <button onclick="toggleSessionSidebar(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_history">📋 历史对话</button>
+                            <button onclick="handleNewSession(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_new">➕ 新对话</button>
+                            <button onclick="toggleOasisMobile(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_oasis">🏛️ OASIS</button>
+                            <button onclick="handleLogout(); closeMobileMenu();" class="mobile-menu-item text-red-500" data-i18n="menu_logout">🚪 退出</button>
                         </div>
                     </div>
                 </div>
@@ -418,7 +418,7 @@ HTML_TEMPLATE = """
 
             <div id="chat-box" class="chat-container overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6 flex-grow bg-gray-50">
                 <div class="flex justify-start">
-                    <div class="message-agent bg-white border p-4 max-w-[85%] shadow-sm text-gray-700">
+                    <div class="message-agent bg-white border p-4 max-w-[85%] shadow-sm text-gray-700" data-i18n="welcome_message">
                         你好！我是 Xavier 智能助手。我已经准备好为你服务，请输入你的指令。
                     </div>
                 </div>
@@ -429,7 +429,7 @@ HTML_TEMPLATE = """
                 <div id="tool-panel-wrapper" class="mb-2" style="display:none;">
                     <div class="flex items-center justify-between mb-1">
                         <div class="tool-toggle-btn flex items-center space-x-1 text-sm text-gray-500 font-medium" onclick="toggleToolPanel()">
-                            <span>🧰 可用工具</span>
+                            <span data-i18n="available_tools">🧰 可用工具</span>
                             <span id="tool-count" class="text-xs text-gray-400"></span>
                             <span id="tool-toggle-icon" class="tool-toggle-icon text-xs">▼</span>
                         </div>
@@ -448,23 +448,22 @@ HTML_TEMPLATE = """
                         📎
                         <input type="file" id="image-input" accept="image/*,.pdf,.txt,.md,.csv,.json,.xml,.yaml,.yml,.log,.py,.js,.ts,.html,.css,.java,.c,.cpp,.h,.go,.rs,.sh,.bat,.ini,.toml,.cfg,.conf,.sql,.r,.rb,.mp3,.wav,.ogg,.m4a,.webm,.flac,.aac" multiple style="display:none;" onchange="handleFileSelect(event)">
                     </label>
-                    <button id="record-btn" class="audio-record-btn" title="录音" onclick="toggleRecording()">🎤</button>
+                    <button id="record-btn" class="audio-record-btn" data-i18n-title="recording_title" title="录音" onclick="toggleRecording()">🎤</button>
                     <div class="flex-grow">
                         <textarea id="user-input" rows="1" 
                             class="w-full p-2 sm:p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none transition-all text-sm sm:text-base"
-                            placeholder="输入指令...（可粘贴图片/上传文件/录音）"></textarea>
+                            data-i18n-placeholder="input_placeholder" placeholder="输入指令...（可粘贴图片/上传文件/录音）"></textarea>
                     </div>
                     <button onclick="handleSend()" id="send-btn"
-                        class="bg-blue-600 hover:bg-blue-700 text-white px-4 sm:px-6 py-2 sm:py-3 rounded-xl transition-all font-bold shadow-lg h-[42px] sm:h-[50px] text-sm sm:text-base flex-shrink-0">
-                        发送
+                        class="bg-blue-600 hover:bg-blue-700 text-white px-4 sm:px-6 py-2 sm:py-3 rounded-xl transition-all font-bold shadow-lg h-[42px] sm:h-[50px] text-sm sm:text-base flex-shrink-0"
+                        data-i18n="send_btn">发送
                     </button>
                     <button onclick="handleCancel()" id="cancel-btn"
                         class="bg-red-500 hover:bg-red-600 text-white px-4 sm:px-6 py-2 sm:py-3 rounded-xl transition-all font-bold shadow-lg h-[42px] sm:h-[50px] text-sm sm:text-base flex-shrink-0"
-                        style="display:none;">
-                        终止
+                        style="display:none;" data-i18n="cancel_btn">终止
                     </button>
                 </div>
-                <p class="text-[10px] text-center text-gray-400 mt-2 sm:mt-3 font-mono hidden sm:block">Secured by Nginx Reverse Proxy & SSH Tunnel</p>
+                <p class="text-[10px] text-center text-gray-400 mt-2 sm:mt-3 font-mono hidden sm:block" data-i18n="secure_footer">Secured by Nginx Reverse Proxy & SSH Tunnel</p>
             </div>
         </div>
 
@@ -485,13 +484,13 @@ HTML_TEMPLATE = """
                     <div class="flex items-center space-x-2">
                         <span class="text-lg">🏛️</span>
                         <div>
-                            <h2 class="text-sm font-bold text-gray-800">OASIS 讨论论坛</h2>
-                            <p class="text-[10px] text-gray-500">多专家并行讨论系统</p>
+                            <h2 class="text-sm font-bold text-gray-800" data-i18n="oasis_title">OASIS 讨论论坛</h2>
+                            <p class="text-[10px] text-gray-500" data-i18n="oasis_subtitle">多专家并行讨论系统</p>
                         </div>
                     </div>
                     <div class="flex items-center space-x-1">
-                        <button onclick="refreshOasisTopics()" class="text-gray-400 hover:text-blue-600 p-1 rounded transition-colors" title="刷新">🔄</button>
-                        <button onclick="toggleOasisPanel()" class="text-gray-400 hover:text-red-500 p-1 rounded transition-colors" title="收起">✕</button>
+                        <button onclick="refreshOasisTopics()" class="text-gray-400 hover:text-blue-600 p-1 rounded transition-colors" data-i18n-title="refresh" title="刷新">🔄</button>
+                        <button onclick="toggleOasisPanel()" class="text-gray-400 hover:text-red-500 p-1 rounded transition-colors" data-i18n-title="collapse" title="收起">✕</button>
                     </div>
                 </div>
 
@@ -499,15 +498,15 @@ HTML_TEMPLATE = """
                 <div id="oasis-topic-list-view" class="flex flex-col flex-1 overflow-hidden">
                     <div class="p-3 border-b flex-shrink-0">
                         <div class="flex items-center justify-between">
-                            <span class="text-xs font-semibold text-gray-600">📋 讨论话题</span>
+                            <span class="text-xs font-semibold text-gray-600" data-i18n="oasis_topics">📋 讨论话题</span>
                             <span id="oasis-topic-count" class="text-[10px] text-gray-400"></span>
                         </div>
                     </div>
                     <div id="oasis-topic-list" class="flex-1 overflow-y-auto">
                         <div class="p-6 text-center text-gray-400 text-sm">
                             <div class="text-3xl mb-2">🏛️</div>
-                            <p>暂无讨论话题</p>
-                            <p class="text-xs mt-1">在聊天中让 Agent 发起 OASIS 讨论</p>
+                            <p data-i18n="oasis_no_topics">暂无讨论话题</p>
+                            <p class="text-xs mt-1" data-i18n="oasis_start_hint">在聊天中让 Agent 发起 OASIS 讨论</p>
                         </div>
                     </div>
                 </div>
@@ -517,7 +516,7 @@ HTML_TEMPLATE = """
                     <!-- Detail header -->
                     <div class="p-3 border-b flex-shrink-0">
                         <div class="flex items-center space-x-2">
-                            <button onclick="showOasisTopicList()" class="text-gray-400 hover:text-blue-600 text-sm">← 返回</button>
+                            <button onclick="showOasisTopicList()" class="text-gray-400 hover:text-blue-600 text-sm" data-i18n="oasis_back">← 返回</button>
                             <span id="oasis-detail-status" class="oasis-status-badge"></span>
                             <span id="oasis-detail-round" class="text-[10px] text-gray-400"></span>
                         </div>
@@ -534,7 +533,7 @@ HTML_TEMPLATE = """
                         <div class="oasis-conclusion-box">
                             <div class="flex items-center space-x-1 mb-2">
                                 <span class="text-sm">🏆</span>
-                                <span class="text-xs font-bold text-green-800">讨论结论</span>
+                                <span class="text-xs font-bold text-green-800" data-i18n="oasis_conclusion">讨论结论</span>
                             </div>
                             <p id="oasis-conclusion-text" class="text-xs text-gray-700 leading-relaxed"></p>
                         </div>
@@ -545,6 +544,295 @@ HTML_TEMPLATE = """
     </div>
 
     <script>
+        // ===== i18n 国际化配置 =====
+        const i18n = {
+            'zh-CN': {
+                // 通用
+                loading: '加载中...',
+                error: '错误',
+                success: '成功',
+                cancel: '取消',
+                confirm: '确认',
+                close: '关闭',
+                
+                // 登录页
+                login_title: 'Xavier AnyControl',
+                login_subtitle: '请登录以开始对话',
+                username: '用户名',
+                password: '密码',
+                login_btn: '登录',
+                login_verifying: '验证中...',
+                login_error_invalid: '用户名只能包含字母、数字、下划线、短横线或中文',
+                login_error_failed: '登录失败',
+                login_error_network: '网络错误',
+                login_footer: '身份验证后方可使用，对话和文件按用户隔离',
+                
+                // 头部
+                encrypted: '● 已加密',
+                history: '📋历史',
+                new_chat: '+新',
+                new_chat_mobile: '+',
+                logout: '退出',
+                current_session: '当前对话号',
+                more_actions: '更多操作',
+                
+                // 移动端菜单
+                menu_history: '📋 历史对话',
+                menu_new: '➕ 新对话',
+                menu_oasis: '🏛️ OASIS',
+                menu_logout: '🚪 退出',
+                
+                // 聊天区域
+                welcome_message: '你好！我是 Xavier 智能助手。我已经准备好为你服务，请输入你的指令。',
+                new_session_message: '🆕 已开启新对话。我是 Xavier 智能助手，请输入你的指令。',
+                input_placeholder: '输入指令...（可粘贴图片/上传文件/录音）',
+                send_btn: '发送',
+                cancel_btn: '终止',
+                no_response: '（无响应）',
+                thinking_stopped: '⚠️ 已终止思考',
+                login_expired: '⚠️ 登录已过期，请重新登录',
+                agent_error: '❌ 错误',
+                
+                // 工具面板
+                available_tools: '🧰 可用工具',
+                tool_calling: '（调用工具中...）',
+                tool_return: '🔧 工具返回',
+                
+                // 文件上传
+                max_images: '最多上传5张图片',
+                max_files: '最多上传3个文件',
+                max_audios: '最多上传2个音频',
+                audio_too_large: '音频过大，上限 25MB',
+                pdf_too_large: 'PDF过大，上限 10MB',
+                file_too_large: '文件过大，上限 512KB',
+                unsupported_type: '不支持的文件类型',
+                supported_types: '支持: txt, md, csv, json, py, js, pdf, mp3, wav 等',
+                
+                // 录音
+                recording_title: '录音',
+                recording_stop: '点击停止录音',
+                mic_permission_denied: '无法访问麦克风，请检查浏览器权限设置。',
+                recording_too_long: '录音过长，上限 25MB',
+                
+                // 历史会话
+                history_title: '💬 历史对话',
+                history_loading: '加载中...',
+                history_empty: '暂无历史对话',
+                history_error: '加载失败',
+                history_loading_msg: '加载历史消息...',
+                history_no_msg: '（此对话暂无消息记录）',
+                new_session_confirm: '开启新对话？当前对话的历史记录将保留，可通过切回对话号恢复。',
+                messages_count: '条消息',
+                session_id: '对话号',
+                
+                // TTS
+                tts_read: '朗读',
+                tts_stop: '停止',
+                tts_loading: '加载中...',
+                tts_request_failed: 'TTS 请求失败',
+                code_omitted: '（代码省略）',
+                image_placeholder: '(图片)',
+                audio_placeholder: '(语音)',
+                file_placeholder: '(文件)',
+                
+                // OASIS
+                oasis_title: 'OASIS 讨论论坛',
+                oasis_subtitle: '多专家并行讨论系统',
+                oasis_topics: '📋 讨论话题',
+                oasis_topics_count: '个话题',
+                oasis_no_topics: '暂无讨论话题',
+                oasis_start_hint: '在聊天中让 Agent 发起 OASIS 讨论',
+                oasis_back: '← 返回',
+                oasis_conclusion: '讨论结论',
+                oasis_waiting: '等待专家发言...',
+                oasis_status_pending: '等待中',
+                oasis_status_discussing: '讨论中',
+                oasis_status_concluded: '已完成',
+                oasis_status_error: '出错',
+                oasis_round: '轮',
+                oasis_posts: '帖',
+                oasis_expert_creative: '创意专家',
+                oasis_expert_critical: '批判专家',
+                oasis_expert_data: '数据分析师',
+                oasis_expert_synthesis: '综合顾问',
+                
+                // 离线提示
+                offline_banner: '⚠️ 网络已断开，请检查连接',
+                
+                // 其他
+                splash_subtitle: 'Xavier AI Agent',
+                secure_footer: 'Secured by Nginx Reverse Proxy & SSH Tunnel',
+                refresh: '刷新',
+                collapse: '收起',
+            },
+            'en': {
+                // General
+                loading: 'Loading...',
+                error: 'Error',
+                success: 'Success',
+                cancel: 'Cancel',
+                confirm: 'Confirm',
+                close: 'Close',
+                
+                // Login
+                login_title: 'Xavier AnyControl',
+                login_subtitle: 'Please login to start',
+                username: 'Username',
+                password: 'Password',
+                login_btn: 'Login',
+                login_verifying: 'Verifying...',
+                login_error_invalid: 'Username can only contain letters, numbers, underscore, hyphen or Chinese',
+                login_error_failed: 'Login failed',
+                login_error_network: 'Network error',
+                login_footer: 'Authentication required. Conversations and files are isolated by user',
+                
+                // Header
+                encrypted: '● Encrypted',
+                history: '📋 History',
+                new_chat: '+New',
+                new_chat_mobile: '+',
+                logout: 'Logout',
+                current_session: 'Current session',
+                more_actions: 'More actions',
+                
+                // Mobile menu
+                menu_history: '📋 History',
+                menu_new: '➕ New Chat',
+                menu_oasis: '🏛️ OASIS',
+                menu_logout: '🚪 Logout',
+                
+                // Chat area
+                welcome_message: 'Hello! I am Xavier AI Assistant. Ready to serve you. Please enter your instructions.',
+                new_session_message: '🆕 New conversation started. I am Xavier AI Assistant. Please enter your instructions.',
+                input_placeholder: 'Enter command... (paste images/upload files/record audio)',
+                send_btn: 'Send',
+                cancel_btn: 'Stop',
+                no_response: '(No response)',
+                thinking_stopped: '⚠️ Thinking stopped',
+                login_expired: '⚠️ Session expired, please login again',
+                agent_error: '❌ Error',
+                
+                // Tool panel
+                available_tools: '🧰 Available Tools',
+                tool_calling: '(Calling tool...)',
+                tool_return: '🔧 Tool Return',
+                
+                // File upload
+                max_images: 'Maximum 5 images',
+                max_files: 'Maximum 3 files',
+                max_audios: 'Maximum 2 audio files',
+                audio_too_large: 'Audio too large, limit 25MB',
+                pdf_too_large: 'PDF too large, limit 10MB',
+                file_too_large: 'File too large, limit 512KB',
+                unsupported_type: 'Unsupported file type',
+                supported_types: 'Supported: txt, md, csv, json, py, js, pdf, mp3, wav, etc.',
+                
+                // Recording
+                recording_title: 'Record',
+                recording_stop: 'Click to stop recording',
+                mic_permission_denied: 'Cannot access microphone. Please check browser permissions.',
+                recording_too_long: 'Recording too long, limit 25MB',
+                
+                // History sessions
+                history_title: '💬 History',
+                history_loading: 'Loading...',
+                history_empty: 'No history',
+                history_error: 'Failed to load',
+                history_loading_msg: 'Loading messages...',
+                history_no_msg: '(No messages in this conversation)',
+                new_session_confirm: 'Start new conversation? Current history will be preserved.',
+                messages_count: 'messages',
+                session_id: 'Session',
+                
+                // TTS
+                tts_read: 'Read',
+                tts_stop: 'Stop',
+                tts_loading: 'Loading...',
+                tts_request_failed: 'TTS request failed',
+                code_omitted: '(code omitted)',
+                image_placeholder: '(image)',
+                audio_placeholder: '(audio)',
+                file_placeholder: '(file)',
+                
+                // OASIS
+                oasis_title: 'OASIS Discussion Forum',
+                oasis_subtitle: 'Multi-Expert Parallel Discussion System',
+                oasis_topics: '📋 Discussion Topics',
+                oasis_topics_count: 'topics',
+                oasis_no_topics: 'No discussion topics',
+                oasis_start_hint: 'Ask Agent to start an OASIS discussion in chat',
+                oasis_back: '← Back',
+                oasis_conclusion: 'Conclusion',
+                oasis_waiting: 'Waiting for experts...',
+                oasis_status_pending: 'Pending',
+                oasis_status_discussing: 'Discussing',
+                oasis_status_concluded: 'Completed',
+                oasis_status_error: 'Error',
+                oasis_round: 'rounds',
+                oasis_posts: 'posts',
+                oasis_expert_creative: 'Creative Expert',
+                oasis_expert_critical: 'Critical Expert',
+                oasis_expert_data: 'Data Analyst',
+                oasis_expert_synthesis: 'Synthesis Advisor',
+                
+                // Offline
+                offline_banner: '⚠️ Network disconnected, please check connection',
+                
+                // Others
+                splash_subtitle: 'Xavier AI Agent',
+                secure_footer: 'Secured by Nginx Reverse Proxy & SSH Tunnel',
+                refresh: 'Refresh',
+                collapse: 'Collapse',
+            }
+        };
+        
+        // 当前语言
+        let currentLang = localStorage.getItem('lang') || 'zh-CN';
+        // 确保语言值有效
+        if (!i18n[currentLang]) { currentLang = 'zh-CN'; localStorage.setItem('lang', 'zh-CN'); }
+        
+        // 获取翻译文本
+        function t(key) {
+            return (i18n[currentLang] && i18n[currentLang][key]) || i18n['zh-CN'][key] || key;
+        }
+        
+        // 切换语言
+        function toggleLanguage() {
+            currentLang = currentLang === 'zh-CN' ? 'en' : 'zh-CN';
+            localStorage.setItem('lang', currentLang);
+            document.documentElement.lang = currentLang;
+            applyTranslations();
+        }
+        
+        // 应用翻译到页面
+        function applyTranslations() {
+            // 更新语言按钮显示
+            const langBtn = document.getElementById('lang-toggle-btn');
+            if (langBtn) {
+                langBtn.textContent = currentLang === 'zh-CN' ? 'EN' : '中文';
+            }
+            
+            // 更新 data-i18n 属性的元素
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if (el.tagName === 'INPUT' && el.hasAttribute('placeholder')) {
+                    el.placeholder = t(key);
+                } else if (el.tagName === 'TEXTAREA' && el.hasAttribute('placeholder')) {
+                    el.placeholder = t(key);
+                } else {
+                    el.textContent = t(key);
+                }
+            });
+            
+            // 更新 data-i18n-placeholder 属性
+            document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+                el.placeholder = t(el.getAttribute('data-i18n-placeholder'));
+            });
+            
+            // 更新 title
+            document.title = 'Xavier AnyControl | AI Agent';
+        }
+        
         marked.setOptions({
             highlight: function(code, lang) {
                 const language = hljs.getLanguage(lang) ? lang : 'plaintext';
@@ -601,7 +889,7 @@ HTML_TEMPLATE = """
             if (!files.length) return;
             for (const file of files) {
                 if (file.type.startsWith('image/')) {
-                    if (pendingImages.length >= 5) { alert('最多上传5张图片'); break; }
+                    if (pendingImages.length >= 5) { alert(t('max_images')); break; }
                     if (file.size <= MAX_IMAGE_SIZE) {
                         const reader = new FileReader();
                         reader.onload = (e) => {
@@ -616,8 +904,8 @@ HTML_TEMPLATE = """
                         });
                     }
                 } else if (file.type.startsWith('audio/') || AUDIO_EXTENSIONS.has('.' + file.name.split('.').pop().toLowerCase())) {
-                    if (file.size > MAX_AUDIO_SIZE) { alert(`音频 ${file.name} 过大（${(file.size/1024/1024).toFixed(1)}MB），上限 25MB`); continue; }
-                    if (pendingAudios.length >= 2) { alert('最多上传2个音频'); break; }
+                    if (file.size > MAX_AUDIO_SIZE) { alert(`${file.name}: ${t('audio_too_large')} (${(file.size/1024/1024).toFixed(1)}MB)`); continue; }
+                    if (pendingAudios.length >= 2) { alert(t('max_audios')); break; }
                     const ext = file.name.split('.').pop().toLowerCase();
                     const fmt = ({'mp3':'mp3','wav':'wav','ogg':'ogg','m4a':'m4a','webm':'webm','flac':'flac','aac':'aac'})[ext] || 'mp3';
                     const reader = new FileReader();
@@ -627,8 +915,8 @@ HTML_TEMPLATE = """
                     };
                     reader.readAsDataURL(file);
                 } else if (file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf') {
-                    if (file.size > MAX_PDF_SIZE) { alert(`PDF ${file.name} 过大（${(file.size/1024/1024).toFixed(1)}MB），上限 10MB`); continue; }
-                    if (pendingFiles.length >= 3) { alert('最多上传3个文件'); break; }
+                    if (file.size > MAX_PDF_SIZE) { alert(`${file.name}: ${t('pdf_too_large')} (${(file.size/1024/1024).toFixed(1)}MB)`); continue; }
+                    if (pendingFiles.length >= 3) { alert(t('max_files')); break; }
                     const reader = new FileReader();
                     reader.onload = (e) => {
                         pendingFiles.push({ name: file.name, content: e.target.result, type: 'pdf' });
@@ -637,9 +925,9 @@ HTML_TEMPLATE = """
                     reader.readAsDataURL(file);
                 } else {
                     const ext = '.' + file.name.split('.').pop().toLowerCase();
-                    if (!TEXT_EXTENSIONS.has(ext)) { alert(`不支持的文件类型: ${ext}\n支持: txt, md, csv, json, py, js, pdf, mp3, wav 等`); continue; }
-                    if (file.size > MAX_FILE_SIZE) { alert(`文件 ${file.name} 过大（${(file.size/1024).toFixed(0)}KB），上限 512KB`); continue; }
-                    if (pendingFiles.length >= 3) { alert('最多上传3个文件'); break; }
+                    if (!TEXT_EXTENSIONS.has(ext)) { alert(`${t('unsupported_type')}: ${ext}\\n${t('supported_types')}`); continue; }
+                    if (file.size > MAX_FILE_SIZE) { alert(`${file.name}: ${t('file_too_large')} (${(file.size/1024).toFixed(0)}KB)`); continue; }
+                    if (pendingFiles.length >= 3) { alert(t('max_files')); break; }
                     const reader = new FileReader();
                     reader.onload = (e) => {
                         pendingFiles.push({ name: file.name, content: e.target.result, type: 'text' });
@@ -707,9 +995,9 @@ HTML_TEMPLATE = """
                 audioProcessorNode.connect(audioContext.destination);
                 isRecording = true;
                 document.getElementById('record-btn').classList.add('recording');
-                document.getElementById('record-btn').title = '点击停止录音';
+                document.getElementById('record-btn').title = t('recording_stop');
             } catch (err) {
-                alert('无法访问麦克风，请检查浏览器权限设置。' + '\\n' + err.message);
+                alert(t('mic_permission_denied') + '\\n' + err.message);
             }
         }
 
@@ -733,14 +1021,15 @@ HTML_TEMPLATE = """
             recordedSamples = [];
             isRecording = false;
             document.getElementById('record-btn').classList.remove('recording');
-            document.getElementById('record-btn').title = '录音';
+            document.getElementById('record-btn').title = t('recording_title');
             const blob = encodeWAV(merged, sampleRate);
-            if (blob.size > MAX_AUDIO_SIZE) { alert('录音过长，上限 25MB'); return; }
-            if (pendingAudios.length >= 2) { alert('最多2个音频'); return; }
+            if (blob.size > MAX_AUDIO_SIZE) { alert(t('recording_too_long')); return; }
+            if (pendingAudios.length >= 2) { alert(t('max_audios')); return; }
             const reader = new FileReader();
             reader.onload = (e) => {
-                const ts = new Date().toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
-                pendingAudios.push({ base64: e.target.result, name: `录音_${ts}.wav`, format: 'wav' });
+                const ts = new Date().toLocaleTimeString(currentLang === 'zh-CN' ? 'zh-CN' : 'en-US', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+                const recName = currentLang === 'zh-CN' ? `录音_${ts}.wav` : `recording_${ts}.wav`;
+                pendingAudios.push({ base64: e.target.result, name: recName, format: 'wav' });
                 renderAudioPreviews();
             };
             reader.readAsDataURL(blob);
@@ -774,7 +1063,7 @@ HTML_TEMPLATE = """
             for (const item of items) {
                 if (!item.type.startsWith('image/')) continue;
                 event.preventDefault();
-                if (pendingImages.length >= 5) { alert('最多上传5张图片'); break; }
+                if (pendingImages.length >= 5) { alert(t('max_images')); break; }
                 const file = item.getAsFile();
                 const reader = new FileReader();
                 reader.onload = (e) => {
@@ -847,12 +1136,12 @@ HTML_TEMPLATE = """
             const el = document.getElementById('session-display');
             if (el && currentSessionId) {
                 el.textContent = '#' + currentSessionId.slice(-6);
-                el.title = '对话号: ' + currentSessionId;
+                el.title = t('session_id') + ': ' + currentSessionId;
             }
         }
 
         function handleNewSession() {
-            if (!confirm('开启新对话？当前对话的历史记录将保留，可通过切回对话号恢复。')) return;
+            if (!confirm(t('new_session_confirm'))) return;
             currentSessionId = generateSessionId();
             sessionStorage.setItem('sessionId', currentSessionId);
             updateSessionDisplay();
@@ -861,7 +1150,7 @@ HTML_TEMPLATE = """
             chatBox.innerHTML = `
                 <div class="flex justify-start">
                     <div class="message-agent bg-white border p-4 max-w-[85%] shadow-sm text-gray-700">
-                        🆕 已开启新对话。我是 Xavier 智能助手，请输入你的指令。
+                        ${t('new_session_message')}
                     </div>
                 </div>`;
         }
@@ -901,12 +1190,12 @@ HTML_TEMPLATE = """
 
         async function loadSessionList() {
             const listEl = document.getElementById('session-list');
-            listEl.innerHTML = '<div class="text-xs text-gray-400 text-center py-4">加载中...</div>';
+            listEl.innerHTML = `<div class="text-xs text-gray-400 text-center py-4">${t('loading')}</div>`;
             try {
                 const resp = await fetch('/proxy_sessions');
                 const data = await resp.json();
                 if (!data.sessions || data.sessions.length === 0) {
-                    listEl.innerHTML = '<div class="text-xs text-gray-400 text-center py-4">暂无历史对话</div>';
+                    listEl.innerHTML = `<div class="text-xs text-gray-400 text-center py-4">${t('history_empty')}</div>`;
                     return;
                 }
                 listEl.innerHTML = '';
@@ -918,13 +1207,13 @@ HTML_TEMPLATE = """
                     div.className = 'session-item' + (isActive ? ' active' : '');
                     div.innerHTML = `
                         <div class="session-title">${escapeHtml(s.title)}</div>
-                        <div class="session-meta">#${s.session_id.slice(-6)} · ${s.message_count}条消息</div>
+                        <div class="session-meta">#${s.session_id.slice(-6)} · ${s.message_count}${t('messages_count')}</div>
                     `;
                     div.onclick = () => switchToSession(s.session_id);
                     listEl.appendChild(div);
                 }
             } catch (e) {
-                listEl.innerHTML = '<div class="text-xs text-red-400 text-center py-4">加载失败</div>';
+                listEl.innerHTML = `<div class="text-xs text-red-400 text-center py-4">${t('history_error')}</div>`;
             }
         }
 
@@ -937,7 +1226,7 @@ HTML_TEMPLATE = """
 
             // 加载该会话的历史消息
             const chatBox = document.getElementById('chat-box');
-            chatBox.innerHTML = '<div class="text-xs text-gray-400 text-center py-4">加载历史消息...</div>';
+            chatBox.innerHTML = `<div class="text-xs text-gray-400 text-center py-4">${t('history_loading_msg')}</div>`;
 
             try {
                 const resp = await fetch('/proxy_session_history', {
@@ -952,7 +1241,7 @@ HTML_TEMPLATE = """
                     chatBox.innerHTML = `
                         <div class="flex justify-start">
                             <div class="message-agent bg-white border p-4 max-w-[85%] shadow-sm text-gray-700">
-                                （此对话暂无消息记录）
+                                ${t('history_no_msg')}
                             </div>
                         </div>`;
                     return;
@@ -976,14 +1265,14 @@ HTML_TEMPLATE = """
                         chatBox.innerHTML += `
                             <div class="flex justify-end">
                                 <div class="message-user bg-blue-600 text-white p-4 max-w-[85%] shadow-sm">
-                                    ${imagesHtml}${imagesHtml ? '<div style="margin-top:6px">' : ''}${escapeHtml(textContent || '(图片)')}${imagesHtml ? '</div>' : ''}
+                                    ${imagesHtml}${imagesHtml ? '<div style="margin-top:6px">' : ''}${escapeHtml(textContent || '('+t('image_placeholder')+')')}${imagesHtml ? '</div>' : ''}
                                 </div>
                             </div>`;
                     } else if (msg.role === 'tool') {
                         chatBox.innerHTML += `
                             <div class="flex justify-start">
                                 <div class="bg-gray-100 border border-dashed border-gray-300 p-3 max-w-[85%] shadow-sm text-xs text-gray-500 rounded-lg">
-                                    <div class="font-semibold text-gray-600 mb-1">🔧 工具返回: ${escapeHtml(msg.tool_name || '')}</div>
+                                    <div class="font-semibold text-gray-600 mb-1">🔧 ${t('tool_return')}: ${escapeHtml(msg.tool_name || '')}</div>
                                     <pre class="whitespace-pre-wrap break-words">${escapeHtml(msg.content.length > 500 ? msg.content.slice(0, 500) + '...' : msg.content)}</pre>
                                 </div>
                             </div>`;
@@ -998,7 +1287,7 @@ HTML_TEMPLATE = """
                         chatBox.innerHTML += `
                             <div class="flex justify-start">
                                 <div class="message-agent bg-white border p-4 max-w-[85%] shadow-sm text-gray-700 markdown-body" data-tts-ready="1">
-                                    ${toolCallsHtml}${msg.content ? marked.parse(msg.content) : '<span class="text-gray-400 text-xs">(调用工具中...)</span>'}
+                                    ${toolCallsHtml}${msg.content ? marked.parse(msg.content) : '<span class="text-gray-400 text-xs">('+t('tool_calling')+')</span>'}
                                 </div>
                             </div>`;
                     }
@@ -1014,7 +1303,7 @@ HTML_TEMPLATE = """
                 chatBox.scrollTop = chatBox.scrollHeight;
             } catch (e) {
                 chatBox.innerHTML = `
-                    <div class="text-xs text-red-400 text-center py-4">加载失败: ${e.message}</div>`;
+                    <div class="text-xs text-red-400 text-center py-4">${t('history_error')}: ${e.message}</div>`;
             }
         }
 
@@ -1033,13 +1322,13 @@ HTML_TEMPLATE = """
             if (!password) { pwInput.focus(); return; }
 
             if (!/^[a-zA-Z0-9_\\-\\u4e00-\\u9fa5]+$/.test(name)) {
-                errorDiv.textContent = '用户名只能包含字母、数字、下划线、短横线或中文';
+                errorDiv.textContent = t('login_error_invalid');
                 errorDiv.classList.remove('hidden');
                 return;
             }
 
             loginBtn.disabled = true;
-            loginBtn.textContent = '验证中...';
+            loginBtn.textContent = t('login_verifying');
 
             try {
                 const resp = await fetch("/proxy_login", {
@@ -1049,7 +1338,7 @@ HTML_TEMPLATE = """
                 });
                 const data = await resp.json();
                 if (!resp.ok) {
-                    errorDiv.textContent = data.detail || data.error || '登录失败';
+                    errorDiv.textContent = data.detail || data.error || t('login_error_failed');
                     errorDiv.classList.remove('hidden');
                     return;
                 }
@@ -1066,11 +1355,11 @@ HTML_TEMPLATE = """
                 loadTools();
                 refreshOasisTopics(); // Load OASIS topics after login
             } catch (e) {
-                errorDiv.textContent = '网络错误: ' + e.message;
+                errorDiv.textContent = t('login_error_network') + ': ' + e.message;
                 errorDiv.classList.remove('hidden');
             } finally {
                 loginBtn.disabled = false;
-                loginBtn.textContent = '登录';
+                loginBtn.textContent = t('login_btn');
             }
         }
 
@@ -1091,7 +1380,7 @@ HTML_TEMPLATE = """
             chatBox.innerHTML = `
                 <div class="flex justify-start">
                     <div class="message-agent bg-white border p-4 max-w-[85%] shadow-sm text-gray-700">
-                        你好！我是 Xavier 智能助手。我已经准备好为你服务，请输入你的指令。
+                        ${t('welcome_message')}
                     </div>
                 </div>`;
             // Stop OASIS polling
@@ -1175,6 +1464,10 @@ HTML_TEMPLATE = """
 
         // Session check
         (function checkSession() {
+            // 初始化语言
+            document.documentElement.lang = currentLang;
+            applyTranslations();
+            
             const saved = sessionStorage.getItem('userId');
             if (saved) {
                 currentUserId = saved;
@@ -1234,7 +1527,7 @@ HTML_TEMPLATE = """
 
         function stripMarkdownForTTS(md) {
             // 移除代码块（含内容）
-            let text = md.replace(/```[\\s\\S]*?```/g, '（代码省略）');
+            let text = md.replace(/```[\\s\\S]*?```/g, '('+t('code_omitted')+')');
             // 移除行内代码
             text = text.replace(/`[^`]+`/g, '');
             // 移除图片
@@ -1261,7 +1554,7 @@ HTML_TEMPLATE = """
             }
             if (currentTtsBtn) {
                 currentTtsBtn.classList.remove('playing', 'loading');
-                currentTtsBtn.querySelector('.tts-label').textContent = '朗读';
+                currentTtsBtn.querySelector('.tts-label').textContent = t('tts_read');
                 currentTtsBtn = null;
             }
         }
@@ -1280,7 +1573,7 @@ HTML_TEMPLATE = """
 
             currentTtsBtn = btn;
             btn.classList.add('loading');
-            btn.querySelector('.tts-label').textContent = '加载中...';
+            btn.querySelector('.tts-label').textContent = t('tts_loading');
 
             try {
                 const resp = await fetch('/proxy_tts', {
@@ -1288,7 +1581,7 @@ HTML_TEMPLATE = """
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ text: cleanText })
                 });
-                if (!resp.ok) throw new Error('TTS 请求失败');
+                if (!resp.ok) throw new Error(t('tts_request_failed'));
 
                 const blob = await resp.blob();
                 const url = URL.createObjectURL(blob);
@@ -1297,7 +1590,7 @@ HTML_TEMPLATE = """
 
                 btn.classList.remove('loading');
                 btn.classList.add('playing');
-                btn.querySelector('.tts-label').textContent = '停止';
+                btn.querySelector('.tts-label').textContent = t('tts_stop');
 
                 audio.onended = () => {
                     URL.revokeObjectURL(url);
@@ -1324,7 +1617,7 @@ HTML_TEMPLATE = """
                     <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
                     <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
                 </svg>
-                <span class="tts-label">朗读</span>`;
+                <span class="tts-label">${t('tts_read')}</span>`;
             btn.onclick = () => handleTTS(btn, textRef());
             return btn;
         }
@@ -1394,7 +1687,7 @@ HTML_TEMPLATE = """
             const audiosToSend = pendingAudios.map(a => ({ base64: a.base64, name: a.name, format: a.format }));
             const audioNames = pendingAudios.map(a => a.name);
 
-            const label = text || (imagePreviewSrcs.length ? '(图片)' : audioNames.length ? '(语音)' : '(文件)');
+            const label = text || (imagePreviewSrcs.length ? '('+t('image_placeholder')+')' : audioNames.length ? '('+t('audio_placeholder')+')' : '('+t('file_placeholder')+')');
             appendMessage(label, true, imagePreviewSrcs, fileNames, audioNames);
             inputField.value = '';
             inputField.style.height = 'auto';
@@ -1435,11 +1728,11 @@ HTML_TEMPLATE = """
                 if (typingIndicator) typingIndicator.remove();
 
                 if (response.status === 401) {
-                    appendMessage("⚠️ 登录已过期，请重新登录", false);
+                    appendMessage(t('login_expired'), false);
                     handleLogout();
                     return;
                 }
-                if (!response.ok) throw new Error("Agent 响应异常");
+                if (!response.ok) throw new Error("Agent error");
 
                 agentDiv = appendMessage('', false);
 
@@ -1484,7 +1777,7 @@ HTML_TEMPLATE = """
                 }
 
                 if (!fullText) {
-                    agentDiv.innerHTML = '<span class="text-gray-400">（无响应）</span>';
+                    agentDiv.innerHTML = `<span class="text-gray-400">${t('no_response')}</span>`;
                 }
 
                 // After agent response, refresh OASIS topics (in case a new discussion was started)
@@ -1495,13 +1788,13 @@ HTML_TEMPLATE = """
                 if (typingIndicator) typingIndicator.remove();
                 if (error.name === 'AbortError') {
                     if (agentDiv) {
-                        fullText += '\\n\\n⚠️ 已终止思考';
+                        fullText += '\\n\\n' + t('thinking_stopped');
                         agentDiv.innerHTML = marked.parse(fullText);
                     } else {
-                        appendMessage("⚠️ 已终止思考", false);
+                        appendMessage(t('thinking_stopped'), false);
                     }
                 } else {
-                    appendMessage("❌ 错误: " + error.message, false);
+                    appendMessage(t('agent_error') + ': ' + error.message, false);
                 }
             } finally {
                 currentAbortController = null;
@@ -1529,10 +1822,10 @@ HTML_TEMPLATE = """
 
         // Expert avatar mapping
         const expertAvatars = {
-            '创意专家': { cls: 'expert-creative', icon: '💡' },
-            '批判专家': { cls: 'expert-critical', icon: '🔍' },
-            '数据分析师': { cls: 'expert-data', icon: '📊' },
-            '综合顾问': { cls: 'expert-synthesis', icon: '🎯' },
+            [t('oasis_expert_creative')]: { cls: 'expert-creative', icon: '💡' },
+            [t('oasis_expert_critical')]: { cls: 'expert-critical', icon: '🔍' },
+            [t('oasis_expert_data')]: { cls: 'expert-data', icon: '📊' },
+            [t('oasis_expert_synthesis')]: { cls: 'expert-synthesis', icon: '🎯' },
         };
 
         function getExpertAvatar(name) {
@@ -1541,17 +1834,17 @@ HTML_TEMPLATE = """
 
         function getStatusBadge(status) {
             const map = {
-                'pending': { cls: 'oasis-status-pending', text: '等待中' },
-                'discussing': { cls: 'oasis-status-discussing', text: '讨论中' },
-                'concluded': { cls: 'oasis-status-concluded', text: '已完成' },
-                'error': { cls: 'oasis-status-error', text: '出错' },
+                'pending': { cls: 'oasis-status-pending', text: t('oasis_status_pending') },
+                'discussing': { cls: 'oasis-status-discussing', text: t('oasis_status_discussing') },
+                'concluded': { cls: 'oasis-status-concluded', text: t('oasis_status_concluded') },
+                'error': { cls: 'oasis-status-error', text: t('oasis_status_error') },
             };
             return map[status] || { cls: 'oasis-status-pending', text: status };
         }
 
         function formatTime(ts) {
             const d = new Date(ts * 1000);
-            return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+            return d.toLocaleTimeString(currentLang === 'zh-CN' ? 'zh-CN' : 'en-US', { hour: '2-digit', minute: '2-digit' });
         }
 
         function toggleOasisPanel() {
@@ -1628,14 +1921,14 @@ HTML_TEMPLATE = """
         function renderTopicList(topics) {
             const container = document.getElementById('oasis-topic-list');
             const countEl = document.getElementById('oasis-topic-count');
-            countEl.textContent = topics.length + ' 个话题';
+            countEl.textContent = topics.length + ' ' + t('oasis_topics_count');
 
             if (topics.length === 0) {
                 container.innerHTML = `
                     <div class="p-6 text-center text-gray-400 text-sm">
                         <div class="text-3xl mb-2">🏛️</div>
-                        <p>暂无讨论话题</p>
-                        <p class="text-xs mt-1">在聊天中让 Agent 发起 OASIS 讨论</p>
+                        <p>${t('oasis_no_topics')}</p>
+                        <p class="text-xs mt-1">${t('oasis_start_hint')}</p>
                     </div>`;
                 return;
             }
@@ -1647,19 +1940,19 @@ HTML_TEMPLATE = """
                 return (b.created_at || 0) - (a.created_at || 0);
             });
 
-            container.innerHTML = topics.map(t => {
-                const badge = getStatusBadge(t.status);
-                const isActive = t.topic_id === oasisCurrentTopicId;
+            container.innerHTML = topics.map(topic => {
+                const badge = getStatusBadge(topic.status);
+                const isActive = topic.topic_id === oasisCurrentTopicId;
                 return `
-                    <div class="oasis-topic-item p-3 border-b ${isActive ? 'active' : ''}" onclick="openOasisTopic('${t.topic_id}')">
+                    <div class="oasis-topic-item p-3 border-b ${isActive ? 'active' : ''}" onclick="openOasisTopic('${topic.topic_id}')">
                         <div class="flex items-center justify-between mb-1">
                             <span class="oasis-status-badge ${badge.cls}">${badge.text}</span>
-                            <span class="text-[10px] text-gray-400">${t.created_at ? formatTime(t.created_at) : ''}</span>
+                            <span class="text-[10px] text-gray-400">${topic.created_at ? formatTime(topic.created_at) : ''}</span>
                         </div>
-                        <p class="text-sm text-gray-800 font-medium line-clamp-2">${escapeHtml(t.question)}</p>
+                        <p class="text-sm text-gray-800 font-medium line-clamp-2">${escapeHtml(topic.question)}</p>
                         <div class="flex items-center space-x-3 mt-1 text-[10px] text-gray-400">
-                            <span>💬 ${t.post_count || 0} 帖</span>
-                            <span>🔄 ${t.current_round}/${t.max_rounds} 轮</span>
+                            <span>💬 ${topic.post_count || 0} ${t('oasis_posts')}</span>
+                            <span>🔄 ${topic.current_round}/${topic.max_rounds} ${t('oasis_round')}</span>
                         </div>
                     </div>`;
             }).join('');
@@ -1717,7 +2010,8 @@ HTML_TEMPLATE = """
             const badge = getStatusBadge(detail.status);
             document.getElementById('oasis-detail-status').className = 'oasis-status-badge ' + badge.cls;
             document.getElementById('oasis-detail-status').textContent = badge.text;
-            document.getElementById('oasis-detail-round').textContent = `第 ${detail.current_round}/${detail.max_rounds} 轮`;
+            const roundText = currentLang === 'zh-CN' ? `第 ${detail.current_round}/${detail.max_rounds} ${t('oasis_round')}` : `Round ${detail.current_round}/${detail.max_rounds}`;
+            document.getElementById('oasis-detail-round').textContent = roundText;
             document.getElementById('oasis-detail-question').textContent = detail.question;
 
             renderPosts(detail.posts || []);
@@ -1739,7 +2033,7 @@ HTML_TEMPLATE = """
                 box.innerHTML = `
                     <div class="text-center text-gray-400 text-sm py-8">
                         <div class="text-2xl mb-2">💭</div>
-                        <p>等待专家发言...</p>
+                        <p>${t('oasis_waiting')}</p>
                     </div>`;
                 return;
             }
