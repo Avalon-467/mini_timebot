@@ -2175,12 +2175,19 @@ def proxy_ask_stream():
     if not user_id or not password:
         return jsonify({"error": "未登录"}), 401
 
-    user_content = request.json.get("content")
-    enabled_tools = request.json.get("enabled_tools")  # None or list
-    session_id = request.json.get("session_id", "default")
-    images = request.json.get("images")  # None or list of base64 strings
-    files = request.json.get("files")    # None or list of {name, content}
-    audios = request.json.get("audios")  # None or list of {base64, name, format}
+    data = request.get_json(silent=True)
+    if data is None:
+        content_len = request.content_length or 0
+        print(f"[proxy_ask_stream] ⚠️ JSON 解析失败, content_length={content_len}, content_type={request.content_type}")
+        return jsonify({"error": f"请求体解析失败 (大小: {content_len/1024/1024:.1f}MB)"}), 400
+
+    user_content = data.get("content")
+    enabled_tools = data.get("enabled_tools")  # None or list
+    session_id = data.get("session_id", "default")
+    images = data.get("images")  # None or list of base64 strings
+    files = data.get("files")    # None or list of {name, content}
+    audios = data.get("audios")  # None or list of {base64, name, format}
+    print(f"[proxy_ask_stream] 收到请求: text={bool(user_content)}, images={len(images) if images else 0}, files={len(files) if files else 0}, audios={len(audios) if audios else 0}")
     payload = {
         "user_id": user_id,
         "password": password,
@@ -2376,4 +2383,4 @@ def proxy_oasis_experts():
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=int(os.getenv("PORT_FRONTEND", "51209")), debug=False)
+    app.run(host="127.0.0.1", port=int(os.getenv("PORT_FRONTEND", "51209")), debug=False, threaded=True)
