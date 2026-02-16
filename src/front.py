@@ -565,6 +565,35 @@ HTML_TEMPLATE = """
         const MAX_FILE_SIZE = 512 * 1024; // 512KB per text file
         const MAX_PDF_SIZE = 10 * 1024 * 1024; // 10MB per PDF
         const MAX_AUDIO_SIZE = 25 * 1024 * 1024; // 25MB per audio
+        const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 压缩目标：10MB
+        const MAX_IMAGE_DIMENSION = 2048; // 最大边长
+
+        function compressImage(file) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => {
+                    let { width, height } = img;
+                    if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+                        const scale = MAX_IMAGE_DIMENSION / Math.max(width, height);
+                        width = Math.round(width * scale);
+                        height = Math.round(height * scale);
+                    }
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    let quality = 0.85;
+                    let result = canvas.toDataURL('image/jpeg', quality);
+                    while (result.length > MAX_IMAGE_SIZE * 1.37 && quality > 0.3) {
+                        quality -= 0.1;
+                        result = canvas.toDataURL('image/jpeg', quality);
+                    }
+                    resolve(result);
+                };
+                img.src = URL.createObjectURL(file);
+            });
+        }
 
         // ===== File Upload Logic (images + text files + PDF + audio) =====
         function handleFileSelect(event) {
@@ -573,12 +602,19 @@ HTML_TEMPLATE = """
             for (const file of files) {
                 if (file.type.startsWith('image/')) {
                     if (pendingImages.length >= 5) { alert('最多上传5张图片'); break; }
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                        pendingImages.push({ base64: e.target.result, name: file.name });
-                        renderImagePreviews();
-                    };
-                    reader.readAsDataURL(file);
+                    if (file.size <= MAX_IMAGE_SIZE) {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            pendingImages.push({ base64: e.target.result, name: file.name });
+                            renderImagePreviews();
+                        };
+                        reader.readAsDataURL(file);
+                    } else {
+                        compressImage(file).then((compressed) => {
+                            pendingImages.push({ base64: compressed, name: file.name });
+                            renderImagePreviews();
+                        });
+                    }
                 } else if (file.type.startsWith('audio/') || AUDIO_EXTENSIONS.has('.' + file.name.split('.').pop().toLowerCase())) {
                     if (file.size > MAX_AUDIO_SIZE) { alert(`音频 ${file.name} 过大（${(file.size/1024/1024).toFixed(1)}MB），上限 25MB`); continue; }
                     if (pendingAudios.length >= 2) { alert('最多上传2个音频'); break; }
