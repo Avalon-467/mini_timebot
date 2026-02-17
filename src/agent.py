@@ -1,4 +1,5 @@
 import os
+import json
 import copy
 import asyncio
 from typing import Annotated, TypedDict, Optional
@@ -173,6 +174,44 @@ class MiniTimeAgent:
         except FileNotFoundError:
             return ""
 
+    def _get_user_skills(self, user_id: str) -> str:
+        """
+        从 data/user_files/{user_id}/skills_manifest.json 读取用户的 skill list，
+        并返回格式化的 skill 信息字符串。
+        即使没有 skill，也会返回位置信息。
+        """
+        user_files_dir = self._prompts.get("_user_files_dir", "")
+        manifest_path = os.path.join(user_files_dir, user_id, "skills_manifest.json")
+        skills_dir = os.path.join(user_files_dir, user_id, "skills")
+
+        skills_manifest = []
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                skills_manifest = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+
+        # 格式化 skill 信息（即使为空也返回位置信息）
+        skill_lines = ["\n【用户技能列表】"]
+        skill_lines.append(f"技能清单文件位置: {manifest_path}")
+        skill_lines.append(f"技能文件目录位置: {skills_dir}")
+
+        if skills_manifest:
+            skill_lines.append("可用技能：")
+            for skill in skills_manifest:
+                skill_name = skill.get("name", "未命名技能")
+                skill_desc = skill.get("description", "无描述")
+                skill_file = skill.get("file", "")
+                skill_lines.append(f"  - {skill_name}: {skill_desc}")
+                if skill_file:
+                    skill_lines.append(f"    文件: {os.path.join(skills_dir, skill_file)}")
+            skill_lines.append("如需使用某个技能，请使用文件管理工具读取对应的技能文件。")
+        else:
+            skill_lines.append("当前暂无已注册的技能。")
+            skill_lines.append("如需添加技能，请在技能清单文件中添加技能信息。")
+
+        return "\n".join(skill_lines)
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
@@ -304,6 +343,9 @@ class MiniTimeAgent:
         user_profile = self._get_user_profile(user_id)
         if user_profile:
             base_prompt += f"\n{user_profile}\n"
+
+        # 注入用户技能列表（总是显示位置信息）
+        base_prompt += self._get_user_skills(user_id) + "\n"
 
         last_state = self._user_last_tool_state.get(user_id)
 
