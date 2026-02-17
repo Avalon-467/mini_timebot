@@ -16,44 +16,11 @@ import uvicorn
 
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
-# ------------------------------------------------------------------
-# Monkey-patch: 修复 LangChain 将 type:"file" 的 MIME 硬编码为
-# application/pdf 的 bug（langchain_core/messages/block_translators/openai.py）
-# 补丁让 create_file_block 使用 data URI 中解析出的实际 MIME type
-# ------------------------------------------------------------------
-def _patch_langchain_file_mime():
-    try:
-        import langchain_core.messages.block_translators.openai as _oai_mod
-        _original_fn = _oai_mod._convert_openai_format_to_data_block
-
-        def _patched_convert(block):
-            # 仅拦截 base64-style file block，修正 mime_type
-            if (
-                isinstance(block, dict)
-                and block.get("type") == "file"
-                and "file_data" in block.get("file", {})
-            ):
-                parsed = _oai_mod._parse_data_uri(block["file"]["file_data"])
-                if parsed and parsed.get("mime_type"):
-                    # 调用原函数，但之后修正 mime_type
-                    result = _original_fn(block)
-                    # result 可能是 dict（透传）或 ContentBlock
-                    if hasattr(result, "mime_type"):
-                        object.__setattr__(result, "mime_type", parsed["mime_type"])
-                    elif isinstance(result, dict) and "mime_type" in result:
-                        result["mime_type"] = parsed["mime_type"]
-                    return result
-            return _original_fn(block)
-
-        _oai_mod._convert_openai_format_to_data_block = _patched_convert
-        print("[patch] ✅ LangChain file MIME 硬编码已修复")
-    except Exception as e:
-        print(f"[patch] ⚠️ LangChain patch 失败（不影响非音频功能）: {e}")
-
-_patch_langchain_file_mime()
-# ------------------------------------------------------------------
-
 from dotenv import load_dotenv
+
+# API patch（提供音频格式适配和 MIME 修复）
+from api_patch import patch_langchain_file_mime, build_audio_part
+patch_langchain_file_mime()
 
 from agent import MiniTimeAgent
 
@@ -300,31 +267,14 @@ def _build_human_message(text: str, images: list[str] | None = None, files: list
     # PDF 文件：以 file content part 直传
     content_parts.extend(pdf_file_parts)
 
-    # 音频：以 file content part 格式传入
-    # LangChain 的 MIME 硬编码 bug 已通过启动时 monkey-patch 修复
+    # 音频：根据模式自动选择格式
+    # 标准模式 -> type: "input_audio"，非标准模式 -> type: "file"
     if audios:
-        _audio_mime = {
-            "mp3": "audio/mp3", "wav": "audio/wav", "webm": "audio/webm",
-            "ogg": "audio/ogg", "flac": "audio/flac", "aac": "audio/aac",
-            "m4a": "audio/m4a", "mpeg": "audio/mpeg",
-        }
         for audio in audios:
             audio_b64 = audio.get("base64", "")
             audio_fmt = audio.get("format", "webm")
             audio_name = audio.get("name", f"recording.{audio_fmt}")
-            mime = _audio_mime.get(audio_fmt, f"audio/{audio_fmt}")
-            # 确保是完整的 data URI
-            if audio_b64.startswith("data:"):
-                file_data = audio_b64
-            else:
-                file_data = f"data:{mime};base64,{audio_b64}"
-            content_parts.append({
-                "type": "file",
-                "file": {
-                    "filename": audio_name,
-                    "file_data": file_data,
-                },
-            })
+            content_parts.append(build_audio_part(audio_b64, audio_fmt, audio_name))
 
     return HumanMessage(content=content_parts)
 
