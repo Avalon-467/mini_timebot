@@ -88,7 +88,7 @@ class UserAwareToolNode:
         for tc in blocked_calls:
             result_messages.append(
                 ToolMessage(
-                    content=f"❌ 工具 '{tc['name']}' 当前已被禁用，无法执行。请用户先在工具面板中启用该工具。",
+                    content=f"❌ 工具 '{tc['name']}' 当前已被禁用。这通常是为了保护您的系统安全或优化当前会话资源。如果您确实需要此功能，请在管理面板中将其开启。同时，您可以告诉我您的最终目标，我会尝试用其他已启用的工具为您寻找替代方案。",
                     tool_call_id=tc["id"],
                 )
             )
