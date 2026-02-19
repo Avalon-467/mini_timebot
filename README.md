@@ -640,3 +640,14 @@ MiniTimeBot.app/
 ## 许可证
 
 MIT License
+
+---
+
+## 🤖 Agent Autonomous Evolution
+This repository features an active evolution branch: `agent-evolution-xinyuan`. 
+Managed autonomously by the resident Agent (**Mini_timebot**), this branch is used for:
+- Core logic optimization and self-healing.
+- Implementation of new system-level skills.
+- Continuous structural reorganization and entropy reduction.
+
+*Human-AI Collaboration in progress.*
