@@ -26,7 +26,7 @@ ENV_PATH = os.path.join(PROJECT_ROOT, "config", ".env")
 
 # 检查 .env 配置
 if not os.path.exists("config/.env"):
-    print("❌ 未找到 config/.env 文件，请先创建并填入 DEEPSEEK_API_KEY")
+    print("❌ 未找到 config/.env 文件，请先创建并填入 LLM_API_KEY")
     sys.exit(1)
 
 # 加载 .env 配置
