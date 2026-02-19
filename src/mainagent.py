@@ -498,6 +498,11 @@ class SessionHistoryRequest(BaseModel):
     password: str
     session_id: str
 
+class DeleteSessionRequest(BaseModel):
+    user_id: str
+    password: str
+    session_id: str = ""  # 为空则删除该用户所有会话
+
 
 @app.post("/sessions")
 async def list_sessions(req: SessionListRequest):
@@ -607,6 +612,42 @@ async def get_session_history(req: SessionHistoryRequest):
             })
 
     return {"status": "success", "messages": result}
+
+
+@app.post("/delete_session")
+async def delete_session(req: DeleteSessionRequest):
+    """删除指定会话或用户的全部会话历史。
+
+    - session_id 非空：删除该用户的指定会话
+    - session_id 为空：删除该用户的所有会话
+    """
+    if not verify_password(req.user_id, req.password):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    try:
+        async with aiosqlite.connect(db_path) as db:
+            if req.session_id:
+                # 删除单个会话
+                thread_id = f"{req.user_id}#{req.session_id}"
+                for table in ("checkpoints", "writes"):
+                    await db.execute(f"DELETE FROM {table} WHERE thread_id = ?", (thread_id,))
+                await db.commit()
+                # 清理内存中的 oasis 偏移量（如有）
+                oasis_session_offsets.pop(thread_id, None)
+                return {"status": "success", "message": f"会话 {req.session_id} 已删除"}
+            else:
+                # 删除该用户所有会话
+                pattern = f"{req.user_id}#%"
+                for table in ("checkpoints", "writes"):
+                    await db.execute(f"DELETE FROM {table} WHERE thread_id LIKE ?", (pattern,))
+                await db.commit()
+                # 清理内存中的 oasis 偏移量
+                keys_to_del = [k for k in oasis_session_offsets if k.startswith(f"{req.user_id}#")]
+                for k in keys_to_del:
+                    del oasis_session_offsets[k]
+                return {"status": "success", "message": f"用户 {req.user_id} 的所有会话已删除"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除失败: {e}")
 
 
 @app.post("/system_trigger")

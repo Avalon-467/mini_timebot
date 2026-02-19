@@ -21,6 +21,7 @@ LOCAL_LOGIN_URL = f"http://127.0.0.1:{PORT_AGENT}/login"
 LOCAL_TOOLS_URL = f"http://127.0.0.1:{PORT_AGENT}/tools"
 LOCAL_SESSIONS_URL = f"http://127.0.0.1:{PORT_AGENT}/sessions"
 LOCAL_SESSION_HISTORY_URL = f"http://127.0.0.1:{PORT_AGENT}/session_history"
+LOCAL_DELETE_SESSION_URL = f"http://127.0.0.1:{PORT_AGENT}/delete_session"
 LOCAL_TTS_URL = f"http://127.0.0.1:{PORT_AGENT}/tts"
 INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "")
 
@@ -220,6 +221,14 @@ HTML_TEMPLATE = """
         .session-item.active { background: #eff6ff; border-color: #bfdbfe; }
         .session-item .session-title { font-size: 13px; font-weight: 500; color: #374151; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .session-item .session-meta { font-size: 11px; color: #9ca3af; margin-top: 2px; }
+        .session-item .session-delete {
+            display: none; position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+            background: #fee2e2; color: #dc2626; border: none; border-radius: 4px;
+            font-size: 11px; padding: 2px 6px; cursor: pointer; line-height: 1.2;
+        }
+        .session-item { position: relative; }
+        .session-item:hover .session-delete { display: block; }
+        .session-item .session-delete:hover { background: #fca5a5; }
 
         /* === Mobile responsive === */
         @media (max-width: 768px) {
@@ -371,7 +380,10 @@ HTML_TEMPLATE = """
         <div id="session-sidebar" class="session-sidebar" style="display:none;">
             <div class="p-3 border-b bg-gray-50 flex justify-between items-center flex-shrink-0">
                 <span class="text-sm font-bold text-gray-700" data-i18n="history_title">💬 历史对话</span>
-                <button onclick="closeSessionSidebar()" class="text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
+                <div class="flex items-center gap-2">
+                    <button onclick="deleteAllSessions()" class="text-xs text-red-400 hover:text-red-600" data-i18n="delete_all">🗑️ 清空全部</button>
+                    <button onclick="closeSessionSidebar()" class="text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
+                </div>
             </div>
             <div id="session-list" class="flex-1 overflow-y-auto p-2 space-y-1">
                 <div class="text-xs text-gray-400 text-center py-4" data-i18n="loading">加载中...</div>
@@ -624,6 +636,12 @@ HTML_TEMPLATE = """
                 new_session_confirm: '开启新对话？当前对话的历史记录将保留，可通过切回对话号恢复。',
                 messages_count: '条消息',
                 session_id: '对话号',
+                delete_session: '删除',
+                delete_session_confirm: '确定删除此对话？删除后不可恢复。',
+                delete_all_confirm: '确定删除所有对话记录？此操作不可恢复！',
+                delete_success: '删除成功',
+                delete_fail: '删除失败',
+                delete_all: '🗑️ 清空全部',
                 
                 // TTS
                 tts_read: '朗读',
@@ -743,6 +761,12 @@ HTML_TEMPLATE = """
                 new_session_confirm: 'Start new conversation? Current history will be preserved.',
                 messages_count: 'messages',
                 session_id: 'Session',
+                delete_session: 'Delete',
+                delete_session_confirm: 'Delete this conversation? This cannot be undone.',
+                delete_all_confirm: 'Delete ALL conversations? This cannot be undone!',
+                delete_success: 'Deleted',
+                delete_fail: 'Delete failed',
+                delete_all: '🗑️ Clear All',
                 
                 // TTS
                 tts_read: 'Read',
@@ -1208,12 +1232,72 @@ HTML_TEMPLATE = """
                     div.innerHTML = `
                         <div class="session-title">${escapeHtml(s.title)}</div>
                         <div class="session-meta">#${s.session_id.slice(-6)} · ${s.message_count}${t('messages_count')}</div>
+                        <button class="session-delete" onclick="event.stopPropagation(); deleteSession('${s.session_id}')">${t('delete_session')}</button>
                     `;
                     div.onclick = () => switchToSession(s.session_id);
                     listEl.appendChild(div);
                 }
             } catch (e) {
                 listEl.innerHTML = `<div class="text-xs text-red-400 text-center py-4">${t('history_error')}</div>`;
+            }
+        }
+
+        async function deleteSession(sessionId) {
+            if (!confirm(t('delete_session_confirm'))) return;
+            try {
+                const resp = await fetch('/proxy_delete_session', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ session_id: sessionId })
+                });
+                const data = await resp.json();
+                if (resp.ok && data.status === 'success') {
+                    // 如果删除的是当前会话，自动开一个新的
+                    if (sessionId === currentSessionId) {
+                        currentSessionId = generateSessionId();
+                        sessionStorage.setItem('sessionId', currentSessionId);
+                        updateSessionDisplay();
+                        document.getElementById('chat-box').innerHTML = `
+                            <div class="flex justify-start">
+                                <div class="message-agent bg-white border p-4 max-w-[85%] shadow-sm text-gray-700">
+                                    ${t('new_session_message')}
+                                </div>
+                            </div>`;
+                    }
+                    await loadSessionList();
+                } else {
+                    alert(t('delete_fail') + ': ' + (data.detail || data.error || ''));
+                }
+            } catch (e) {
+                alert(t('delete_fail') + ': ' + e.message);
+            }
+        }
+
+        async function deleteAllSessions() {
+            if (!confirm(t('delete_all_confirm'))) return;
+            try {
+                const resp = await fetch('/proxy_delete_session', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ session_id: '' })
+                });
+                const data = await resp.json();
+                if (resp.ok && data.status === 'success') {
+                    currentSessionId = generateSessionId();
+                    sessionStorage.setItem('sessionId', currentSessionId);
+                    updateSessionDisplay();
+                    document.getElementById('chat-box').innerHTML = `
+                        <div class="flex justify-start">
+                            <div class="message-agent bg-white border p-4 max-w-[85%] shadow-sm text-gray-700">
+                                ${t('new_session_message')}
+                            </div>
+                        </div>`;
+                    await loadSessionList();
+                } else {
+                    alert(t('delete_fail') + ': ' + (data.detail || data.error || ''));
+                }
+            } catch (e) {
+                alert(t('delete_fail') + ': ' + e.message);
             }
         }
 
@@ -2603,6 +2687,23 @@ def proxy_session_history():
     sid = request.json.get("session_id", "")
     try:
         r = requests.post(LOCAL_SESSION_HISTORY_URL, json={
+            "user_id": user_id, "password": password, "session_id": sid
+        }, timeout=15)
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_delete_session", methods=["POST"])
+def proxy_delete_session():
+    """代理删除会话请求到后端 Agent"""
+    user_id = session.get("user_id")
+    password = session.get("password")
+    if not user_id or not password:
+        return jsonify({"error": "未登录"}), 401
+    sid = request.json.get("session_id", "") if request.is_json else ""
+    try:
+        r = requests.post(LOCAL_DELETE_SESSION_URL, json={
             "user_id": user_id, "password": password, "session_id": sid
         }, timeout=15)
         return jsonify(r.json()), r.status_code
