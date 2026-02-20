@@ -45,3 +45,8 @@ dist/
 *.spec
 MiniTimeBot.exe
 *.dmg
+
+
+test/
+!test/chat.py
+!test/view_history.py
