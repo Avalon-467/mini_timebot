@@ -14,7 +14,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.prebuilt import ToolNode
 
 
 # --- Tools that need automatic username injection ---
@@ -38,6 +38,9 @@ class AgentState(TypedDict):
     enabled_tools: Optional[list[str]]
     user_id: Optional[str]
     session_id: Optional[str]
+    # 外部调用方传入的 tools 定义（OpenAI function calling 格式）
+    # 当 LLM 选择调用这些工具时，中断图执行并以 tool_calls 格式返回给调用方
+    external_tools: Optional[list[dict]]
 
 
 class UserAwareToolNode:
@@ -270,11 +273,14 @@ class MiniTimeAgent:
         self._mcp_tools = await self._mcp_client.get_tools()
 
         # 4. Build LangGraph workflow
+        # 收集所有内部 MCP 工具名称，用于条件路由
+        self._internal_tool_names = frozenset(t.name for t in self._mcp_tools)
+
         workflow = StateGraph(AgentState)
         workflow.add_node("chatbot", self._call_model)
         workflow.add_node("tools", UserAwareToolNode(self._mcp_tools, lambda: self._mcp_tools))
         workflow.add_edge(START, "chatbot")
-        workflow.add_conditional_edges("chatbot", tools_condition)
+        workflow.add_conditional_edges("chatbot", self._should_continue)
         workflow.add_edge("tools", "chatbot")
 
         self._agent_app = workflow.compile(checkpointer=self._memory)
@@ -309,12 +315,33 @@ class MiniTimeAgent:
         )
 
     # ------------------------------------------------------------------
+    # Conditional edge: route internal tools vs external tools vs end
+    # ------------------------------------------------------------------
+    def _should_continue(self, state: AgentState) -> str:
+        """
+        条件路由：
+        - 无 tool_calls → "end" (正常结束)
+        - 所有 tool_calls 都是内部工具 → "tools" (继续内部循环)
+        - 存在外部工具调用 → "end" (中断返回 tool_calls 给调用方)
+        """
+        last_msg = state["messages"][-1]
+        if not hasattr(last_msg, "tool_calls") or not last_msg.tool_calls:
+            return END
+
+        for tc in last_msg.tool_calls:
+            if tc["name"] not in self._internal_tool_names:
+                # 发现外部工具调用，中断循环让调用方处理
+                print(f">>> [route] 🔀 外部工具调用检测: {tc['name']}，中断返回给调用方")
+                return END
+        return "tools"
+
+    # ------------------------------------------------------------------
     # Core graph node
     # ------------------------------------------------------------------
     async def _call_model(self, state: AgentState):
         """LangGraph node: invoke LLM with dynamic tool binding & tool-state notification."""
 
-        # Dynamic tool binding based on enabled_tools
+        # Dynamic tool binding based on enabled_tools + external_tools
         all_tools = self._mcp_tools
         enabled_names = state.get("enabled_tools")
         if enabled_names is not None:
@@ -322,8 +349,30 @@ class MiniTimeAgent:
         else:
             filtered_tools = all_tools
 
+        # 将外部工具定义（OpenAI function format）转为 LangChain 可绑定的格式
+        external_tools_defs = state.get("external_tools") or []
+        bind_tools_list: list = list(filtered_tools)
+        external_tool_names: set[str] = set()
+        for ext_tool in external_tools_defs:
+            # 支持 OpenAI 标准格式: {"type":"function","function":{...}} 或简化格式 {"name":...,"parameters":...}
+            if ext_tool.get("type") == "function":
+                func_def = ext_tool.get("function", {})
+            else:
+                func_def = ext_tool
+            if func_def.get("name"):
+                external_tool_names.add(func_def["name"])
+                # 以 OpenAI function 格式传入 bind_tools（LangChain 支持 dict 格式）
+                bind_tools_list.append({
+                    "type": "function",
+                    "function": {
+                        "name": func_def["name"],
+                        "description": func_def.get("description", ""),
+                        "parameters": func_def.get("parameters", {"type": "object", "properties": {}}),
+                    },
+                })
+
         base_model = self._get_model()
-        llm = base_model.bind_tools(filtered_tools) if filtered_tools else base_model
+        llm = base_model.bind_tools(bind_tools_list) if bind_tools_list else base_model
 
         # --- KV-Cache-friendly tool state management ---
         all_names = sorted(t.name for t in all_tools)
@@ -374,7 +423,8 @@ class MiniTimeAgent:
         history_messages = list(state["messages"])
 
         # 每次进入前清理：移除末尾不完整的 tool_calls（有 AIMessage 带 tool_calls 但缺少 ToolMessage 回复）
-        history_messages = self._sanitize_messages(history_messages)
+        # 但保留外部工具的未回复 tool_calls（它们正等待调用方回传结果）
+        history_messages = self._sanitize_messages(history_messages, external_tool_names)
 
         # 清理历史消息中的多模态内容（file/image/audio parts），只保留文本
         # 避免旧的二进制附件在后续轮次反复发送给 LLM 导致上游 API 报错
@@ -417,11 +467,17 @@ class MiniTimeAgent:
     # Public interface: tools info
     # ------------------------------------------------------------------
     @staticmethod
-    def _sanitize_messages(messages: list) -> list:
+    def _sanitize_messages(messages: list, external_tool_names: set[str] | None = None) -> list:
         """
         清理消息列表，确保每条带 tool_calls 的 AI 消息后面都有对应的 ToolMessage。
         如果末尾有不完整的 tool_calls 序列，直接截断丢弃。
+
+        但如果 external_tool_names 非空，则保留末尾 AIMessage 中属于外部工具的
+        未回复 tool_calls（它们正等待调用方回传结果）。
         """
+        if not external_tool_names:
+            external_tool_names = set()
+
         # 收集所有已存在的 tool_call_id 回复
         answered_ids = set()
         for msg in messages:
@@ -436,6 +492,17 @@ class MiniTimeAgent:
             if isinstance(last, AIMessage) and hasattr(last, "tool_calls") and last.tool_calls:
                 pending_ids = {tc["id"] for tc in last.tool_calls}
                 if not pending_ids.issubset(answered_ids):
+                    # 检查未回复的 tool_calls 是否全部属于外部工具
+                    unanswered_calls = [
+                        tc for tc in last.tool_calls if tc["id"] not in answered_ids
+                    ]
+                    all_external = all(
+                        tc["name"] in external_tool_names for tc in unanswered_calls
+                    )
+                    if all_external and external_tool_names:
+                        # 外部工具等待回传，保留此消息
+                        break
+                    # 内部工具未完成 → 截断
                     clean.pop()
                     continue
             break

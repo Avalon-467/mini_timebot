@@ -187,6 +187,9 @@ class ChatCompletionRequest(BaseModel):
     stream: bool = False
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
+    # OpenAI function calling 字段
+    tools: Optional[list[dict]] = None       # [{type:"function", function:{name,description,parameters}}]
+    tool_choice: Optional[Any] = None        # "auto" | "none" | "required" | {type:"function",function:{name:...}}
     # 扩展字段：认证 & 会话
     user: Optional[str] = None  # user_id
     # 自定义扩展（通过 extra_body 传入）
@@ -882,8 +885,13 @@ def _make_completion_id() -> str:
 
 
 def _make_openai_response(content: str, model: str = "mini-timebot",
-                          finish_reason: str = "stop") -> dict:
+                          finish_reason: str = "stop",
+                          tool_calls: list[dict] | None = None) -> dict:
     """构造标准 OpenAI chat completion 响应。"""
+    message: dict = {"role": "assistant", "content": content}
+    if tool_calls:
+        message["tool_calls"] = tool_calls
+        finish_reason = "tool_calls"
     return {
         "id": _make_completion_id(),
         "object": "chat.completion",
@@ -891,10 +899,7 @@ def _make_openai_response(content: str, model: str = "mini-timebot",
         "model": model,
         "choices": [{
             "index": 0,
-            "message": {
-                "role": "assistant",
-                "content": content,
-            },
+            "message": message,
             "finish_reason": finish_reason,
         }],
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
@@ -922,6 +927,40 @@ def _make_openai_chunk(content: str = "", model: str = "mini-timebot",
         }],
     }
     return f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+
+
+def _extract_external_tool_names(tools: list[dict] | None) -> set[str]:
+    """从 OpenAI tools 定义列表中提取工具名称集合。"""
+    if not tools:
+        return set()
+    names = set()
+    for t in tools:
+        if t.get("type") == "function":
+            names.add(t["function"]["name"])
+        elif t.get("name"):
+            names.add(t["name"])
+    return names
+
+
+def _format_tool_calls_for_openai(ai_msg: AIMessage, external_names: set[str]) -> list[dict] | None:
+    """
+    从 LangChain AIMessage 的 tool_calls 中提取属于外部工具的调用，
+    格式化为 OpenAI chat completion 的 tool_calls 格式。
+    """
+    if not hasattr(ai_msg, "tool_calls") or not ai_msg.tool_calls:
+        return None
+    external_calls = []
+    for tc in ai_msg.tool_calls:
+        if tc["name"] in external_names:
+            external_calls.append({
+                "id": tc["id"],
+                "type": "function",
+                "function": {
+                    "name": tc["name"],
+                    "arguments": json.dumps(tc.get("args", {}), ensure_ascii=False),
+                },
+            })
+    return external_calls or None
 
 
 def _auth_openai_request(req: ChatCompletionRequest, auth_header: str | None):
@@ -963,6 +1002,8 @@ async def openai_chat_completions(
     请求格式完全兼容 OpenAI API，扩展字段通过顶层或 extra_body 传入：
     - session_id: 会话 ID (默认 "default")
     - enabled_tools: 启用的工具列表 (null=全部)
+    - tools: 外部工具定义（OpenAI function calling 格式）
+    - tool_choice: 工具选择策略
     """
     user_id, authenticated = _auth_openai_request(req, authorization)
     if not authenticated:
@@ -972,24 +1013,59 @@ async def openai_chat_completions(
     thread_id = f"{user_id}#{session_id}"
     config = {"configurable": {"thread_id": thread_id}}
 
-    # 只取最后一条 user message 作为当前输入（LangGraph 有 checkpoint 记忆）
+    external_tool_names = _extract_external_tool_names(req.tools)
+
+    # --- 构造输入消息 ---
+    # 多轮 tool calling 时，最新消息可能是 role=tool（调用方回传结果）
+    # 或 role=assistant+tool_calls（恢复上下文）
+    # 需要从 messages 尾部提取所有 tool result 消息
+    input_messages = []
     last_user_msg = None
-    for msg in reversed(req.messages):
-        if msg.role == "user":
-            last_user_msg = msg
+
+    # 从后往前扫描，收集尾部连续的 tool messages 和 assistant messages
+    trailing_tool_msgs = []
+    i = len(req.messages) - 1
+    while i >= 0:
+        msg = req.messages[i]
+        if msg.role == "tool":
+            trailing_tool_msgs.insert(0, msg)
+            i -= 1
+        elif msg.role == "assistant" and msg.tool_calls and trailing_tool_msgs:
+            # 跳过 assistant 消息（已在 checkpoint 中），只取 tool results
+            i -= 1
+        else:
             break
 
-    if not last_user_msg:
-        raise HTTPException(status_code=400, detail="messages 中缺少 user 消息")
-
-    human_msg = _openai_msg_to_human_message(last_user_msg)
+    if trailing_tool_msgs:
+        # 多轮 tool calling 模式：调用方回传了 tool results
+        # 将 ToolMessage 注入 checkpoint 继续执行
+        tool_result_messages = []
+        for tmsg in trailing_tool_msgs:
+            tool_result_messages.append(
+                ToolMessage(
+                    content=tmsg.content if isinstance(tmsg.content, str) else json.dumps(tmsg.content, ensure_ascii=False),
+                    tool_call_id=tmsg.tool_call_id or "",
+                    name=tmsg.name or "",
+                )
+            )
+        input_messages = tool_result_messages
+    else:
+        # 正常模式：取最后一条 user message
+        for msg in reversed(req.messages):
+            if msg.role == "user":
+                last_user_msg = msg
+                break
+        if not last_user_msg:
+            raise HTTPException(status_code=400, detail="messages 中缺少 user 或 tool 消息")
+        input_messages = [_openai_msg_to_human_message(last_user_msg)]
 
     user_input = {
-        "messages": [human_msg],
+        "messages": input_messages,
         "trigger_source": "user",
         "enabled_tools": req.enabled_tools,
         "user_id": user_id,
         "session_id": session_id,
+        "external_tools": req.tools,
     }
 
     model_name = req.model or "mini-timebot"
@@ -997,7 +1073,15 @@ async def openai_chat_completions(
     # --- 非流式 ---
     if not req.stream:
         result = await agent.agent_app.ainvoke(user_input, config)
-        reply = result["messages"][-1].content
+        last_msg = result["messages"][-1]
+
+        # 检测是否有外部工具调用需要返回
+        ext_tool_calls = _format_tool_calls_for_openai(last_msg, external_tool_names)
+        if ext_tool_calls:
+            return _make_openai_response(
+                last_msg.content or "", model=model_name, tool_calls=ext_tool_calls)
+
+        reply = last_msg.content if isinstance(last_msg.content, str) else str(last_msg.content)
         return _make_openai_response(reply, model=model_name)
 
     # --- 流式 (SSE) ---
@@ -1023,15 +1107,43 @@ async def openai_chat_completions(
                             chunk.content, model=model_name, completion_id=completion_id))
                 elif kind == "on_tool_start":
                     tool_name = event.get("name", "")
-                    await queue.put(_make_openai_chunk(
-                        f"\n🔧 调用工具: {tool_name}...\n",
-                        model=model_name, completion_id=completion_id))
+                    if tool_name not in external_tool_names:
+                        await queue.put(_make_openai_chunk(
+                            f"\n🔧 调用工具: {tool_name}...\n",
+                            model=model_name, completion_id=completion_id))
                 elif kind == "on_tool_end":
-                    await queue.put(_make_openai_chunk(
-                        f"\n✅ 工具执行完成\n",
-                        model=model_name, completion_id=completion_id))
+                    tool_name = event.get("name", "")
+                    if tool_name not in external_tool_names:
+                        await queue.put(_make_openai_chunk(
+                            f"\n✅ 工具执行完成\n",
+                            model=model_name, completion_id=completion_id))
 
-            # finish
+            # 流式结束后，检查是否有外部工具调用
+            snapshot = await agent.agent_app.aget_state(config)
+            last_msgs = snapshot.values.get("messages", [])
+            if last_msgs:
+                last_msg_item = last_msgs[-1]
+                ext_tool_calls = _format_tool_calls_for_openai(last_msg_item, external_tool_names)
+                if ext_tool_calls:
+                    # 以非流式格式发送 tool_calls（流式 tool_calls 较复杂，这里用简单方案）
+                    tc_response = {
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": model_name,
+                        "choices": [{
+                            "index": 0,
+                            "delta": {
+                                "tool_calls": ext_tool_calls,
+                            },
+                            "finish_reason": "tool_calls",
+                        }],
+                    }
+                    await queue.put(f"data: {json.dumps(tc_response, ensure_ascii=False)}\n\n")
+                    await queue.put("data: [DONE]\n\n")
+                    return
+
+            # 正常结束
             await queue.put(_make_openai_chunk(
                 "", model=model_name, finish_reason="stop", completion_id=completion_id))
             await queue.put("data: [DONE]\n\n")
