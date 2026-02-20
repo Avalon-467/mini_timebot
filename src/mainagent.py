@@ -38,15 +38,6 @@ prompts_dir = os.path.join(root_dir, "data", "prompts")
 
 load_dotenv(dotenv_path=env_path)
 
-# 启动时加载 oasis_trigger prompt 模板
-_oasis_trigger_tpl = ""
-try:
-    with open(os.path.join(prompts_dir, "oasis_trigger.txt"), "r", encoding="utf-8") as f:
-        _oasis_trigger_tpl = f.read().strip()
-    print("[prompts] ✅ mainagent 已加载 oasis_trigger.txt")
-except FileNotFoundError:
-    print("[prompts] ⚠️ 未找到 oasis_trigger.txt，将使用内置默认值")
-
 
 # --- Internal token for service-to-service auth ---
 INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "").strip()
@@ -101,10 +92,6 @@ def verify_password(username: str, password: str) -> bool:
 # --- Create agent instance ---
 agent = MiniTimeAgent(src_dir=current_dir, db_path=db_path)
 
-# --- Oasis Bridge: 增量历史偏移量 ---
-# session_id -> read offset (for incremental history delivery)
-oasis_session_offsets: dict[str, int] = {}
-
 
 # --- FastAPI lifespan ---
 @asynccontextmanager
@@ -151,13 +138,6 @@ class CancelRequest(BaseModel):
     user_id: str
     password: str
     session_id: str = "default"
-
-class OasisAskRequest(BaseModel):
-    """外部 OASIS 论坛调用本 Agent 参与讨论的请求"""
-    session_id: str
-    topic: str = "未知议题"
-    history: list[dict] = []
-    user_id: str = "oasis_external"
 
 
 # ------------------------------------------------------------------
@@ -685,8 +665,6 @@ async def delete_session(req: DeleteSessionRequest):
                 for table in ("checkpoints", "writes"):
                     await db.execute(f"DELETE FROM {table} WHERE thread_id = ?", (thread_id,))
                 await db.commit()
-                # 清理内存中的 oasis 偏移量（如有）
-                oasis_session_offsets.pop(thread_id, None)
                 return {"status": "success", "message": f"会话 {req.session_id} 已删除"}
             else:
                 # 删除该用户所有会话
@@ -694,10 +672,6 @@ async def delete_session(req: DeleteSessionRequest):
                 for table in ("checkpoints", "writes"):
                     await db.execute(f"DELETE FROM {table} WHERE thread_id LIKE ?", (pattern,))
                 await db.commit()
-                # 清理内存中的 oasis 偏移量
-                keys_to_del = [k for k in oasis_session_offsets if k.startswith(f"{req.user_id}#")]
-                for k in keys_to_del:
-                    del oasis_session_offsets[k]
                 return {"status": "success", "message": f"用户 {req.user_id} 的所有会话已删除"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"删除失败: {e}")
@@ -718,99 +692,6 @@ async def system_trigger(req: SystemTriggerRequest, x_internal_token: str | None
     # fire-and-forget：立刻返回，graph 在后台异步执行
     asyncio.create_task(agent.agent_app.ainvoke(system_input, config))
     return {"status": "received", "message": f"系统触发已收到，用户 {req.user_id}"}
-
-
-# ------------------------------------------------------------------
-# Oasis Bridge: 外部 OASIS 论坛调用 Agent 参与讨论
-# ------------------------------------------------------------------
-
-@app.post("/oasis/ask")
-async def oasis_ask(req: OasisAskRequest, x_internal_token: str | None = Header(None)):
-    """
-    外部 OASIS 论坛调用此接口，邀请本 Agent 参与讨论。
-    需要在请求头中携带 X-Internal-Token 进行鉴权。
-
-    流程:
-    1. 增量提取历史消息（只发送 Agent 还没见过的新内容）
-    2. 格式化为可读文本，构造系统触发消息
-    3. 调用 Agent ainvoke 等待思考完成
-    4. 直接从 Agent 回复中提取内容返回给外部 OASIS
-
-    Payload 示例:
-    {
-        "session_id": "oasis_abc123",
-        "topic": "AI是否应该有情感？",
-        "history": [
-            {"role": "创意专家", "content": "我认为AI应该..."},
-            {"role": "批判专家", "content": "但是风险在于..."}
-        ],
-        "user_id": "oasis_external"
-    }
-    """
-    verify_internal_token(x_internal_token)
-    session_id = req.session_id
-
-    # --- 增量提取：只获取 Agent 没见过的新消息 ---
-    last_idx = oasis_session_offsets.get(session_id, 0)
-    new_messages = req.history[last_idx:]
-
-    if not new_messages and last_idx > 0:
-        return {"content": "我已了解当前进展，暂无补充。", "status": "skipped"}
-
-    # 格式化新消息为可读文本
-    formatted_new_input = "\n".join([
-        f"[{msg.get('role', '未知专家')}]: {msg.get('content', '')}"
-        for msg in new_messages
-    ])
-
-    # 更新偏移量
-    oasis_session_offsets[session_id] = len(req.history)
-
-    # --- 构造系统触发消息，通知 Agent 参与讨论 ---
-    trigger_text = _oasis_trigger_tpl.format(
-        topic=req.topic,
-        new_input=formatted_new_input,
-    ) if _oasis_trigger_tpl else (
-        f"[外部学术会议邀请]\n"
-        f"你被邀请参加一场 OASIS 学术讨论会议。\n"
-        f"讨论主题: {req.topic}\n\n"
-        f"--- 其他专家的最新发言 ---\n"
-        f"{formatted_new_input}\n"
-        f"--- 发言结束 ---\n\n"
-        f"请认真阅读以上内容，作为专家给出你的观点和分析。"
-        f"直接回复你的意见即可，不需要调用任何工具。"
-    )
-
-    # 使用独立的会话 ID 避免污染用户的正常对话
-    oasis_thread_id = f"{req.user_id}#oasis_{session_id}"
-    config = {"configurable": {"thread_id": oasis_thread_id}}
-    system_input = {
-        "messages": [HumanMessage(content=trigger_text)],
-        "trigger_source": "system",
-        "enabled_tools": None,
-        "user_id": req.user_id,
-        "session_id": f"oasis_{session_id}",
-    }
-
-    try:
-        result = await asyncio.wait_for(
-            agent.agent_app.ainvoke(system_input, config),
-            timeout=120.0,
-        )
-        reply = result["messages"][-1].content
-        return {"content": reply, "expert_name": "MiniTimeBot", "status": "success"}
-    except asyncio.TimeoutError:
-        return {
-            "content": "(Agent 思考过久，未能在规定时间内回应)",
-            "expert_name": "MiniTimeBot",
-            "status": "timeout",
-        }
-    except Exception as e:
-        return {
-            "content": f"(Agent 处理异常: {str(e)})",
-            "expert_name": "MiniTimeBot",
-            "status": "error",
-        }
 
 
 # ------------------------------------------------------------------
