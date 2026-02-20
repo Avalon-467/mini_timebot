@@ -3,9 +3,11 @@ import json
 import hashlib
 import asyncio
 import secrets
+import base64
 from contextlib import asynccontextmanager
 
 import aiosqlite
+import httpx
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -15,6 +17,10 @@ import uvicorn
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 from dotenv import load_dotenv
+
+# API patch（提供音频格式适配和 MIME 修复）
+from api_patch import patch_langchain_file_mime, build_audio_part
+patch_langchain_file_mime()
 
 from agent import MiniTimeAgent
 
@@ -119,6 +125,9 @@ class UserRequest(BaseModel):
     text: str
     enabled_tools: Optional[list[str]] = None
     session_id: str = "default"
+    images: Optional[list[str]] = None  # list of base64 data URIs
+    files: Optional[list[dict]] = None  # list of {name: str, content: str}
+    audios: Optional[list[dict]] = None  # list of {base64: str, name: str, format: str}
 
 class SystemTriggerRequest(BaseModel):
     user_id: str
@@ -136,6 +145,138 @@ class OasisAskRequest(BaseModel):
     topic: str = "未知议题"
     history: list[dict] = []
     user_id: str = "oasis_external"
+
+
+def _decode_pdf_data_uri(data_uri: str) -> bytes:
+    """从 base64 data URI 解码出 PDF 字节。"""
+    if "," in data_uri:
+        data_uri = data_uri.split(",", 1)[1]
+    return base64.b64decode(data_uri)
+
+
+def _extract_pdf_text(data_uri: str) -> str:
+    """从 base64 data URI 中提取 PDF 文本内容（纯文本模式）。"""
+    try:
+        import fitz  # pymupdf
+        pdf_bytes = _decode_pdf_data_uri(data_uri)
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        pages = []
+        for i, page in enumerate(doc):
+            text = page.get_text()
+            if text.strip():
+                pages.append(f"--- 第{i+1}页 ---\n{text.strip()}")
+        doc.close()
+        if not pages:
+            return "(PDF 未提取到文本内容，可能是扫描件/纯图片 PDF)"
+        return "\n\n".join(pages)
+    except ImportError:
+        return "(服务端未安装 pymupdf，无法解析 PDF。请运行: pip install pymupdf)"
+    except Exception as e:
+        return f"(PDF 解析失败: {str(e)})"
+
+
+
+def _build_human_message(text: str, images: list[str] | None = None, files: list[dict] | None = None, audios: list[dict] | None = None) -> HumanMessage:
+    """构造 HumanMessage，支持图片、文件附件（文本/PDF）和音频。
+    - 图片：当 LLM_VISION_SUPPORT=true 时构造 OpenAI vision 格式；否则降级提示。
+    - 文本文件：将文件内容以 markdown 代码块形式拼接到消息文本中。
+    - PDF 文件：
+        * 视觉模式：以 file content part 直传原始 PDF + 提取文本
+        * 非视觉模式：pymupdf 提取纯文本
+    - 音频：以 file content part 格式传入（data URI，兼容 OpenAI 代理）
+    """
+    vision_supported = os.getenv("LLM_VISION_SUPPORT", "true").lower() == "true"
+
+    # 收集需要以 file content part 传入的 PDF（视觉模式下）
+    pdf_file_parts: list[dict] = []
+
+    # 拼接文件内容到消息末尾
+    file_text = ""
+    if files:
+        file_parts = []
+        for f in files:
+            fname = f.get("name", "未知文件")
+            ftype = f.get("type", "text")
+            fcontent = f.get("content", "")
+
+            if ftype == "pdf":
+                if vision_supported:
+                    # 视觉模式：以 file content part 直传 PDF + 提取文本备用
+                    pdf_text = _extract_pdf_text(fcontent)
+                    if len(pdf_text) > 50000:
+                        pdf_text = pdf_text[:50000] + f"\n\n... (文件过长，已截断)"
+                    # 确保 data URI 格式正确
+                    pdf_data_uri = fcontent if fcontent.startswith("data:") else f"data:application/pdf;base64,{fcontent}"
+                    pdf_file_parts.append({
+                        "type": "file",
+                        "file": {
+                            "filename": fname,
+                            "file_data": pdf_data_uri,
+                        },
+                    })
+                    file_parts.append(f"📄 **附件: {fname}** (已上传原始 PDF 供分析，同时附上提取的文本)\n```\n{pdf_text}\n```")
+                else:
+                    # 非视觉模式：仅文本
+                    pdf_text = _extract_pdf_text(fcontent)
+                    if len(pdf_text) > 50000:
+                        pdf_text = pdf_text[:50000] + f"\n\n... (文件过长，已截断)"
+                    file_parts.append(f"📄 **附件: {fname}**\n```\n{pdf_text}\n```")
+            else:
+                # 普通文本文件
+                if len(fcontent) > 50000:
+                    fcontent = fcontent[:50000] + f"\n\n... (文件过长，已截断，共 {len(f.get('content', ''))} 字符)"
+                file_parts.append(f"📄 **附件: {fname}**\n```\n{fcontent}\n```")
+
+        if file_parts:
+            file_text = "\n\n" + "\n\n".join(file_parts)
+
+    combined_text = (text or "") + file_text
+
+    # 用户上传的图片
+    all_images = list(images or [])
+
+    # 判断是否有多模态内容（图片、PDF file parts、音频）
+    has_multimodal = bool(all_images) or bool(pdf_file_parts) or bool(audios)
+
+    if not has_multimodal:
+        return HumanMessage(content=combined_text or "(空消息)")
+
+    if not vision_supported and all_images:
+        hint = f"\n\n[系统提示：你发送了{len(images or [])}张图片，但当前模型不支持图片识别，图片已忽略。请切换到支持视觉的模型（如 gemini-2.0-flash、gpt-4o）后重试。]"
+        combined_text = combined_text + hint
+        # 如果没有音频和 PDF file，直接返回纯文本
+        if not audios and not pdf_file_parts:
+            return HumanMessage(content=combined_text)
+        all_images = []  # 清空图片，但继续处理音频/PDF
+
+    # 多模态：构造 content list
+    content_parts = []
+    if combined_text:
+        content_parts.append({"type": "text", "text": combined_text})
+    elif audios:
+        # 用户只发了语音没有文字，添加占位 text（API 代理要求至少有一个 text part）
+        content_parts.append({"type": "text", "text": "请听取并处理以下音频："})
+
+    # 图片：OpenAI vision 格式
+    for img_data in all_images:
+        content_parts.append({
+            "type": "image_url",
+            "image_url": {"url": img_data},
+        })
+
+    # PDF 文件：以 file content part 直传
+    content_parts.extend(pdf_file_parts)
+
+    # 音频：根据模式自动选择格式
+    # 标准模式 -> type: "input_audio"，非标准模式 -> type: "file"
+    if audios:
+        for audio in audios:
+            audio_b64 = audio.get("base64", "")
+            audio_fmt = audio.get("format", "webm")
+            audio_name = audio.get("name", f"recording.{audio_fmt}")
+            content_parts.append(build_audio_part(audio_b64, audio_fmt, audio_name))
+
+    return HumanMessage(content=content_parts)
 
 
 # --- Routes ---
@@ -163,7 +304,7 @@ async def ask_agent(req: UserRequest):
     thread_id = f"{req.user_id}#{req.session_id}"
     config = {"configurable": {"thread_id": thread_id}}
     user_input = {
-        "messages": [HumanMessage(content=req.text)],
+        "messages": [_build_human_message(req.text, req.images, req.files, req.audios)],
         "trigger_source": "user",
         "enabled_tools": req.enabled_tools,
         "user_id": req.user_id,
@@ -187,7 +328,7 @@ async def ask_agent_stream(req: UserRequest):
     thread_id = f"{req.user_id}#{req.session_id}"
     config = {"configurable": {"thread_id": thread_id}}
     user_input = {
-        "messages": [HumanMessage(content=req.text)],
+        "messages": [_build_human_message(req.text, req.images, req.files, req.audios)],
         "trigger_source": "user",
         "enabled_tools": req.enabled_tools,
         "user_id": req.user_id,
@@ -279,6 +420,72 @@ async def cancel_agent(req: CancelRequest):
 
 
 # ------------------------------------------------------------------
+# TTS: 文本转语音
+# ------------------------------------------------------------------
+
+class TTSRequest(BaseModel):
+    user_id: str
+    password: str
+    text: str
+    voice: Optional[str] = None
+
+@app.post("/tts")
+async def text_to_speech(req: TTSRequest):
+    """将文本转为语音，返回 mp3 音频流"""
+    if not verify_password(req.user_id, req.password):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    tts_text = req.text.strip()
+    if not tts_text:
+        raise HTTPException(status_code=400, detail="文本不能为空")
+
+    # 限制长度，避免过长文本
+    if len(tts_text) > 4000:
+        tts_text = tts_text[:4000]
+
+    api_key = os.getenv("LLM_API_KEY", "")
+    base_url = os.getenv("LLM_BASE_URL", "").rstrip("/")
+    tts_model = os.getenv("TTS_MODEL", "gemini-2.5-flash-preview-tts")
+    tts_voice = req.voice or os.getenv("TTS_VOICE", "charon")
+
+    if not api_key or not base_url:
+        raise HTTPException(status_code=500, detail="TTS API 未配置")
+
+    tts_url = f"{base_url}/audio/speech"
+
+    async def audio_stream():
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            async with client.stream(
+                "POST",
+                tts_url,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": tts_model,
+                    "input": tts_text,
+                    "voice": tts_voice,
+                    "response_format": "mp3",
+                },
+            ) as resp:
+                if resp.status_code != 200:
+                    error_body = await resp.aread()
+                    raise HTTPException(
+                        status_code=resp.status_code,
+                        detail=f"TTS API 错误: {error_body.decode('utf-8', errors='replace')[:200]}",
+                    )
+                async for chunk in resp.aiter_bytes(chunk_size=4096):
+                    yield chunk
+
+    return StreamingResponse(
+        audio_stream(),
+        media_type="audio/mpeg",
+        headers={"Content-Disposition": "inline; filename=tts_output.mp3"},
+    )
+
+
+# ------------------------------------------------------------------
 # Session history: 从 checkpoint DB 读取会话列表和历史消息
 # ------------------------------------------------------------------
 
@@ -290,6 +497,11 @@ class SessionHistoryRequest(BaseModel):
     user_id: str
     password: str
     session_id: str
+
+class DeleteSessionRequest(BaseModel):
+    user_id: str
+    password: str
+    session_id: str = ""  # 为空则删除该用户所有会话
 
 
 @app.post("/sessions")
@@ -323,7 +535,16 @@ async def list_sessions(req: SessionListRequest):
         msg_count = 0
         for m in msgs:
             if hasattr(m, "content") and type(m).__name__ == "HumanMessage":
-                content = m.content if isinstance(m.content, str) else str(m.content)
+                # 多模态 content 可能是 list，提取其中的文本部分
+                raw = m.content
+                if isinstance(raw, str):
+                    content = raw
+                elif isinstance(raw, list):
+                    content = " ".join(
+                        p.get("text", "") for p in raw if isinstance(p, dict) and p.get("type") == "text"
+                    ) or "(图片消息)"
+                else:
+                    content = str(raw)
                 # 跳过系统触发消息
                 if content.startswith("[系统触发]") or content.startswith("[外部学术会议邀请]"):
                     continue
@@ -363,7 +584,8 @@ async def get_session_history(req: SessionHistoryRequest):
     for m in msgs:
         msg_type = type(m).__name__
         if msg_type == "HumanMessage":
-            content = m.content if isinstance(m.content, str) else str(m.content)
+            # 多模态消息 content 可能是 list（含 text+image_url），直接透传
+            content = m.content
             result.append({"role": "user", "content": content})
         elif msg_type == "AIMessage":
             content = m.content if isinstance(m.content, str) else str(m.content)
@@ -390,6 +612,42 @@ async def get_session_history(req: SessionHistoryRequest):
             })
 
     return {"status": "success", "messages": result}
+
+
+@app.post("/delete_session")
+async def delete_session(req: DeleteSessionRequest):
+    """删除指定会话或用户的全部会话历史。
+
+    - session_id 非空：删除该用户的指定会话
+    - session_id 为空：删除该用户的所有会话
+    """
+    if not verify_password(req.user_id, req.password):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    try:
+        async with aiosqlite.connect(db_path) as db:
+            if req.session_id:
+                # 删除单个会话
+                thread_id = f"{req.user_id}#{req.session_id}"
+                for table in ("checkpoints", "writes"):
+                    await db.execute(f"DELETE FROM {table} WHERE thread_id = ?", (thread_id,))
+                await db.commit()
+                # 清理内存中的 oasis 偏移量（如有）
+                oasis_session_offsets.pop(thread_id, None)
+                return {"status": "success", "message": f"会话 {req.session_id} 已删除"}
+            else:
+                # 删除该用户所有会话
+                pattern = f"{req.user_id}#%"
+                for table in ("checkpoints", "writes"):
+                    await db.execute(f"DELETE FROM {table} WHERE thread_id LIKE ?", (pattern,))
+                await db.commit()
+                # 清理内存中的 oasis 偏移量
+                keys_to_del = [k for k in oasis_session_offsets if k.startswith(f"{req.user_id}#")]
+                for k in keys_to_del:
+                    del oasis_session_offsets[k]
+                return {"status": "success", "message": f"用户 {req.user_id} 的所有会话已删除"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除失败: {e}")
 
 
 @app.post("/system_trigger")

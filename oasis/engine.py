@@ -8,7 +8,7 @@ Manages the full lifecycle of a discussion:
 import asyncio
 import os
 
-from langchain_deepseek import ChatDeepSeek
+from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
 
 from oasis.forum import DiscussionForum
@@ -26,13 +26,14 @@ except FileNotFoundError:
     _SUMMARY_PROMPT_TPL = ""
 
 
-def _get_summarizer() -> ChatDeepSeek:
+def _get_summarizer() -> ChatOpenAI:
     """Create a low-temperature LLM for reliable summarization."""
-    api_key = os.getenv("DEEPSEEK_API_KEY")
+    api_key = os.getenv("LLM_API_KEY")
     if not api_key:
-        raise ValueError("DEEPSEEK_API_KEY not found in environment variables.")
-    return ChatDeepSeek(
-        model="deepseek-chat",
+        raise ValueError("LLM_API_KEY not found in environment variables.")
+    return ChatOpenAI(
+        model=os.getenv("LLM_MODEL", "deepseek-chat"),
+        base_url=os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1"),
         api_key=api_key,
         temperature=0.3,
         max_tokens=2048,

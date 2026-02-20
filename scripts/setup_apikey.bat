@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul 2>&1
 
-:: DeepSeek API Key 配置脚本
+:: LLM API Key 配置脚本（支持 DeepSeek / OpenAI / Gemini 等 OpenAI 兼容接口）
 
 cd /d "%~dp0\.."
 
@@ -12,7 +12,7 @@ set "EXAMPLE_FILE=config\.env.example"
 if not exist "%ENV_FILE%" goto ask_key
 
 :: 读取当前 Key
-for /f "tokens=1,* delims==" %%a in ('findstr /i "DEEPSEEK_API_KEY" "%ENV_FILE%"') do set "CURRENT_KEY=%%b"
+for /f "tokens=1,* delims==" %%a in ('findstr /i "LLM_API_KEY" "%ENV_FILE%"') do set "CURRENT_KEY=%%b"
 if "%CURRENT_KEY%"=="" goto ask_key
 if "%CURRENT_KEY%"=="your_api_key_here" goto ask_key
 
@@ -34,12 +34,12 @@ if /i not "%RESET%"=="y" (
 
 :ask_key
 echo ================================================
-echo   需要配置 DeepSeek API Key 才能使用
-echo   获取地址: https://platform.deepseek.com/api_keys
+echo   需要配置 LLM API Key 才能使用
+echo   支持 DeepSeek / OpenAI / Gemini 等
 echo ================================================
 echo.
 
-set /p API_KEY=请输入你的 DeepSeek API Key: 
+set /p API_KEY=请输入你的 API Key: 
 
 if "%API_KEY%"=="" (
     echo [SKIP] 未输入 API Key，跳过配置
@@ -47,29 +47,71 @@ if "%API_KEY%"=="" (
     exit /b 1
 )
 
+set /p BASE_URL=请输入 API Base URL（回车默认 https://api.deepseek.com/v1）: 
+if "%BASE_URL%"=="" set "BASE_URL=https://api.deepseek.com/v1"
+
+set /p MODEL_NAME=请输入模型名称（回车默认 deepseek-chat）: 
+if "%MODEL_NAME%"=="" set "MODEL_NAME=deepseek-chat"
+
+set /p TTS_MODEL=请输入 TTS 模型名称（回车默认 gemini-2.5-flash-preview-tts）: 
+if "%TTS_MODEL%"=="" set "TTS_MODEL=gemini-2.5-flash-preview-tts"
+
+set /p TTS_VOICE=请输入 TTS 语音（回车默认 charon）: 
+if "%TTS_VOICE%"=="" set "TTS_VOICE=charon"
+
 :: 如果已有 .env，用 PowerShell 原地替换 Key，保留其余配置
 if exist "%ENV_FILE%" (
-    :: 检查是否已有 DEEPSEEK_API_KEY 行
-    findstr /i "^DEEPSEEK_API_KEY=" "%ENV_FILE%" >nul 2>&1
+    :: 更新 LLM_API_KEY
+    findstr /i "^LLM_API_KEY=" "%ENV_FILE%" >nul 2>&1
     if %errorlevel%==0 (
-        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^DEEPSEEK_API_KEY=.*', 'DEEPSEEK_API_KEY=%API_KEY%' | Set-Content '%ENV_FILE%'"
+        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^LLM_API_KEY=.*', 'LLM_API_KEY=%API_KEY%' | Set-Content '%ENV_FILE%'"
     ) else (
-        echo DEEPSEEK_API_KEY=%API_KEY%>> "%ENV_FILE%"
+        echo LLM_API_KEY=%API_KEY%>> "%ENV_FILE%"
     )
-    :: 确保 API_BASE 存在
-    findstr /i "^DEEPSEEK_API_BASE=" "%ENV_FILE%" >nul 2>&1
-    if %errorlevel% neq 0 (
-        echo DEEPSEEK_API_BASE=https://api.deepseek.com>> "%ENV_FILE%"
+    :: 更新 LLM_BASE_URL
+    findstr /i "^LLM_BASE_URL=" "%ENV_FILE%" >nul 2>&1
+    if %errorlevel%==0 (
+        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^LLM_BASE_URL=.*', 'LLM_BASE_URL=%BASE_URL%' | Set-Content '%ENV_FILE%'"
+    ) else (
+        echo LLM_BASE_URL=%BASE_URL%>> "%ENV_FILE%"
+    )
+    :: 更新 LLM_MODEL
+    findstr /i "^LLM_MODEL=" "%ENV_FILE%" >nul 2>&1
+    if %errorlevel%==0 (
+        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^LLM_MODEL=.*', 'LLM_MODEL=%MODEL_NAME%' | Set-Content '%ENV_FILE%'"
+    ) else (
+        echo LLM_MODEL=%MODEL_NAME%>> "%ENV_FILE%"
+    )
+    :: 更新 TTS_MODEL
+    findstr /i "^TTS_MODEL=" "%ENV_FILE%" >nul 2>&1
+    if %errorlevel%==0 (
+        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^TTS_MODEL=.*', 'TTS_MODEL=%TTS_MODEL%' | Set-Content '%ENV_FILE%'"
+    ) else (
+        echo TTS_MODEL=%TTS_MODEL%>> "%ENV_FILE%"
+    )
+    :: 更新 TTS_VOICE
+    findstr /i "^TTS_VOICE=" "%ENV_FILE%" >nul 2>&1
+    if %errorlevel%==0 (
+        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^TTS_VOICE=.*', 'TTS_VOICE=%TTS_VOICE%' | Set-Content '%ENV_FILE%'"
+    ) else (
+        echo TTS_VOICE=%TTS_VOICE%>> "%ENV_FILE%"
     )
 ) else (
     :: 首次创建：从模板复制再写入
     if exist "%EXAMPLE_FILE%" (
         copy /y "%EXAMPLE_FILE%" "%ENV_FILE%" >nul
-        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^DEEPSEEK_API_KEY=.*', 'DEEPSEEK_API_KEY=%API_KEY%' | Set-Content '%ENV_FILE%'"
+        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^LLM_API_KEY=.*', 'LLM_API_KEY=%API_KEY%' | Set-Content '%ENV_FILE%'"
+        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^LLM_BASE_URL=.*', 'LLM_BASE_URL=%BASE_URL%' | Set-Content '%ENV_FILE%'"
+        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^LLM_MODEL=.*', 'LLM_MODEL=%MODEL_NAME%' | Set-Content '%ENV_FILE%'"
+        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^# TTS_MODEL=.*', 'TTS_MODEL=%TTS_MODEL%' | Set-Content '%ENV_FILE%'"
+        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^# TTS_VOICE=.*', 'TTS_VOICE=%TTS_VOICE%' | Set-Content '%ENV_FILE%'"
     ) else (
         (
-            echo DEEPSEEK_API_KEY=%API_KEY%
-            echo DEEPSEEK_API_BASE=https://api.deepseek.com
+            echo LLM_API_KEY=%API_KEY%
+            echo LLM_BASE_URL=%BASE_URL%
+            echo LLM_MODEL=%MODEL_NAME%
+            echo TTS_MODEL=%TTS_MODEL%
+            echo TTS_VOICE=%TTS_VOICE%
         ) > "%ENV_FILE%"
     )
 )

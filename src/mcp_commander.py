@@ -48,7 +48,7 @@ if IS_WINDOWS:
         # 网络（只读）
         "ping", "curl", "ipconfig", "nslookup", "tracert", "netstat",
         # PowerShell 常用（安全子集）
-        "powershell",
+        "powershell","npm","npx","git","node"
     }
 else:
     _DEFAULT_COMMANDS = {
@@ -66,6 +66,7 @@ else:
         "python", "python3",
         # 网络（只读）
         "ping", "curl", "wget",
+        "npm","npx","git","node"
     }
 
 # 从 .env 读取用户自定义白名单，留空或不设置则使用默认
@@ -96,7 +97,7 @@ else:
     ]
 
 # 执行超时（秒）— 支持 .env 自定义
-EXEC_TIMEOUT = int(os.getenv("EXEC_TIMEOUT", "30"))
+EXEC_TIMEOUT = int(os.getenv("EXEC_TIMEOUT", "60"))
 
 # 输出最大长度（字符数）— 支持 .env 自定义
 MAX_OUTPUT_LENGTH = int(os.getenv("MAX_OUTPUT_LENGTH", "8000"))

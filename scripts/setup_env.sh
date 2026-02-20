@@ -50,7 +50,7 @@ echo "--- 配置检查 ---"
 if [ -f "config/.env" ]; then
     echo "✅ config/.env 已存在"
 else
-    echo "⚠️  config/.env 不存在，请创建并填入: DEEPSEEK_API_KEY=your_key"
+    echo "⚠️  config/.env 不存在，请创建并填入: LLM_API_KEY=your_key"
 fi
 
 if [ -f "config/users.json" ]; then

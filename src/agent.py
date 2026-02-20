@@ -1,4 +1,5 @@
 import os
+import json
 import copy
 import asyncio
 from typing import Annotated, TypedDict, Optional
@@ -9,7 +10,7 @@ from langgraph.graph.message import add_messages
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 # Model related
-from langchain_deepseek import ChatDeepSeek
+from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -88,7 +89,7 @@ class UserAwareToolNode:
         for tc in blocked_calls:
             result_messages.append(
                 ToolMessage(
-                    content=f"❌ 工具 '{tc['name']}' 当前已被禁用，无法执行。请用户先在工具面板中启用该工具。",
+                    content=f"❌ 工具 '{tc['name']}' 当前已被禁用。这通常是为了保护您的系统安全或优化当前会话资源。如果您确实需要此功能，请在管理面板中将其开启。同时，您可以告诉我您的最终目标，我会尝试用其他已启用的工具为您寻找替代方案。",
                     tool_call_id=tc["id"],
                 )
             )
@@ -173,6 +174,44 @@ class MiniTimeAgent:
         except FileNotFoundError:
             return ""
 
+    def _get_user_skills(self, user_id: str) -> str:
+        """
+        从 data/user_files/{user_id}/skills_manifest.json 读取用户的 skill list，
+        并返回格式化的 skill 信息字符串。
+        即使没有 skill，也会返回位置信息。
+        """
+        user_files_dir = self._prompts.get("_user_files_dir", "")
+        manifest_path = os.path.join(user_files_dir, user_id, "skills_manifest.json")
+        skills_dir = os.path.join(user_files_dir, user_id, "skills")
+
+        skills_manifest = []
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                skills_manifest = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+
+        # 格式化 skill 信息（即使为空也返回位置信息）
+        skill_lines = ["\n【用户技能列表】"]
+        skill_lines.append(f"技能清单文件位置: {manifest_path}")
+        skill_lines.append(f"技能文件目录位置: {skills_dir}")
+
+        if skills_manifest:
+            skill_lines.append("可用技能：")
+            for skill in skills_manifest:
+                skill_name = skill.get("name", "未命名技能")
+                skill_desc = skill.get("description", "无描述")
+                skill_file = skill.get("file", "")
+                skill_lines.append(f"  - {skill_name}: {skill_desc}")
+                if skill_file:
+                    skill_lines.append(f"    文件: {os.path.join(skills_dir, skill_file)}")
+            skill_lines.append("如需使用某个技能，请使用文件管理工具读取对应的技能文件。")
+        else:
+            skill_lines.append("当前暂无已注册的技能。")
+            skill_lines.append("如需添加技能，请在技能清单文件中添加技能信息。")
+
+        return "\n".join(skill_lines)
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
@@ -253,12 +292,15 @@ class MiniTimeAgent:
     # Model factory
     # ------------------------------------------------------------------
     @staticmethod
-    def _get_model() -> ChatDeepSeek:
-        api_key = os.getenv("DEEPSEEK_API_KEY")
+    def _get_model() -> ChatOpenAI:
+        api_key = os.getenv("LLM_API_KEY")
+        base_url = os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1")
+        model = os.getenv("LLM_MODEL", "deepseek-chat")
         if not api_key:
-            raise ValueError("未检测到 DEEPSEEK_API_KEY，请在环境变量中设置。")
-        return ChatDeepSeek(
-            model="deepseek-chat",
+            raise ValueError("未检测到 LLM_API_KEY，请在环境变量中设置。")
+        return ChatOpenAI(
+            model=model,
+            base_url=base_url,
             api_key=api_key,
             temperature=0.7,
             max_tokens=2048,
@@ -302,6 +344,9 @@ class MiniTimeAgent:
         if user_profile:
             base_prompt += f"\n{user_profile}\n"
 
+        # 注入用户技能列表（总是显示位置信息）
+        base_prompt += self._get_user_skills(user_id) + "\n"
+
         last_state = self._user_last_tool_state.get(user_id)
 
         tool_status_prompt = ""
@@ -331,6 +376,12 @@ class MiniTimeAgent:
         # 每次进入前清理：移除末尾不完整的 tool_calls（有 AIMessage 带 tool_calls 但缺少 ToolMessage 回复）
         history_messages = self._sanitize_messages(history_messages)
 
+        # 清理历史消息中的多模态内容（file/image/audio parts），只保留文本
+        # 避免旧的二进制附件在后续轮次反复发送给 LLM 导致上游 API 报错
+        # 注意：保留最后一条 HumanMessage 的多模态内容（当前轮用户输入）
+        if len(history_messages) > 1:
+            history_messages = self._strip_multimodal_parts(history_messages[:-1]) + [history_messages[-1]]
+
         # 如果是系统触发，且最后一条不是 ToolMessage（非工具回调轮），给它加上系统触发说明
         is_system = state.get("trigger_source") == "system"
         if is_system and history_messages and isinstance(history_messages[-1], HumanMessage):
@@ -343,8 +394,14 @@ class MiniTimeAgent:
         # 正常对话流程（用户和系统触发共用）
         if tool_status_prompt and len(history_messages) >= 1:
             last_msg = history_messages[-1]
-            augmented_content = f"[系统通知] {tool_status_prompt}\n\n---\n{last_msg.content}"
-            augmented_msg = HumanMessage(content=augmented_content)
+            # 如果最后一条是多模态 content（list），将通知插入为第一个 text part
+            if isinstance(last_msg.content, list):
+                notification = {"type": "text", "text": f"[系统通知] {tool_status_prompt}\n\n---\n"}
+                augmented_content = [notification] + list(last_msg.content)
+                augmented_msg = HumanMessage(content=augmented_content)
+            else:
+                augmented_content = f"[系统通知] {tool_status_prompt}\n\n---\n{last_msg.content}"
+                augmented_msg = HumanMessage(content=augmented_content)
             input_messages = (
                 [SystemMessage(content=base_prompt)]
                 + history_messages[:-1]
@@ -383,6 +440,37 @@ class MiniTimeAgent:
                     continue
             break
         return clean
+
+    @staticmethod
+    def _strip_multimodal_parts(messages: list) -> list:
+        """
+        将所有 HumanMessage 中的多模态 content（list 格式）转为纯文本。
+        - type:"text" 的 part 保留文本
+        - type:"file" 替换为 "[用户上传了文件: {filename}]"
+        - type:"image_url" 替换为 "[用户上传了图片]"
+        - 其他未知 type 丢弃
+        """
+        result = []
+        for msg in messages:
+            if isinstance(msg, HumanMessage) and isinstance(msg.content, list):
+                text_parts = []
+                for part in msg.content:
+                    if not isinstance(part, dict):
+                        text_parts.append(str(part))
+                        continue
+                    ptype = part.get("type", "")
+                    if ptype == "text":
+                        text_parts.append(part.get("text", ""))
+                    elif ptype == "file":
+                        fname = part.get("file", {}).get("filename", "附件")
+                        text_parts.append(f"[用户上传了文件: {fname}]")
+                    elif ptype == "image_url":
+                        text_parts.append("[用户上传了图片]")
+                combined = "\n".join(t for t in text_parts if t)
+                result.append(HumanMessage(content=combined or "(空消息)"))
+            else:
+                result.append(msg)
+        return result
 
     def get_tools_info(self) -> list[dict]:
         """Return serializable tool metadata list."""
