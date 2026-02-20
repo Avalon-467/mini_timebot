@@ -23,6 +23,8 @@ LOCAL_SESSIONS_URL = f"http://127.0.0.1:{PORT_AGENT}/sessions"
 LOCAL_SESSION_HISTORY_URL = f"http://127.0.0.1:{PORT_AGENT}/session_history"
 LOCAL_DELETE_SESSION_URL = f"http://127.0.0.1:{PORT_AGENT}/delete_session"
 LOCAL_TTS_URL = f"http://127.0.0.1:{PORT_AGENT}/tts"
+# OpenAI 兼容端点
+LOCAL_OPENAI_COMPLETIONS_URL = f"http://127.0.0.1:{PORT_AGENT}/v1/chat/completions"
 INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "")
 
 # OASIS Forum proxy
@@ -872,6 +874,9 @@ HTML_TEMPLATE = """
         let pendingFiles = [];  // [{name: "data.csv", content: "...(text content)"}, ...]
         let pendingAudios = []; // [{base64: "data:audio/...", name: "recording.wav", format: "wav"}, ...]
         let isRecording = false;
+
+        // OpenAI API 配置
+        function getAuthToken() { return sessionStorage.getItem('authToken') || ''; }
         const TEXT_EXTENSIONS = new Set(['.txt','.md','.csv','.json','.xml','.yaml','.yml','.log','.py','.js','.ts','.html','.css','.java','.c','.cpp','.h','.go','.rs','.sh','.bat','.ini','.toml','.cfg','.conf','.sql','.r','.rb']);
         const AUDIO_EXTENSIONS = new Set(['.mp3','.wav','.ogg','.m4a','.webm','.flac','.aac']);
         const MAX_FILE_SIZE = 512 * 1024; // 512KB per text file
@@ -1429,7 +1434,9 @@ HTML_TEMPLATE = """
 
                 currentUserId = name;
                 sessionStorage.setItem('userId', name);
-                sessionStorage.setItem('authToken', data.token || '');
+                // 存储 OpenAI 格式的 Bearer token: user_id:password
+                const authToken = name + ':' + password;
+                sessionStorage.setItem('authToken', authToken);
                 initSession();
 
                 document.getElementById('uid-display').textContent = 'UID: ' + name;
@@ -1791,20 +1798,57 @@ HTML_TEMPLATE = """
             let fullText = '';
 
             try {
-                const payload = { content: text, enabled_tools: getEnabledTools(), session_id: currentSessionId };
-                if (imagesToSend.length > 0) {
-                    payload.images = imagesToSend;
+                // --- 构造 OpenAI 格式的 content parts ---
+                const contentParts = [];
+                if (text) {
+                    contentParts.push({ type: 'text', text: text });
                 }
-                if (filesToSend.length > 0) {
-                    payload.files = filesToSend;
+                // 图片 → image_url
+                for (const img of imagesToSend) {
+                    contentParts.push({ type: 'image_url', image_url: { url: img } });
                 }
-                if (audiosToSend.length > 0) {
-                    payload.audios = audiosToSend;
+                // 音频 → input_audio
+                for (const audio of audiosToSend) {
+                    contentParts.push({
+                        type: 'input_audio',
+                        input_audio: { data: audio.base64, format: audio.format || 'webm' }
+                    });
                 }
-                const response = await fetch("/proxy_ask_stream", {
+                // 文件 → file
+                for (const f of filesToSend) {
+                    const fileData = f.content.startsWith('data:') ? f.content : 'data:application/octet-stream;base64,' + f.content;
+                    contentParts.push({
+                        type: 'file',
+                        file: { filename: f.name, file_data: fileData }
+                    });
+                }
+
+                // 如果只有纯文本，content 用字符串；否则用 parts 数组
+                let msgContent;
+                if (contentParts.length === 1 && contentParts[0].type === 'text') {
+                    msgContent = contentParts[0].text;
+                } else if (contentParts.length > 0) {
+                    msgContent = contentParts;
+                } else {
+                    msgContent = '(空消息)';
+                }
+
+                // --- 构造 OpenAI /v1/chat/completions 请求 ---
+                const openaiPayload = {
+                    model: 'mini-timebot',
+                    messages: [{ role: 'user', content: msgContent }],
+                    stream: true,
+                    session_id: currentSessionId,
+                    enabled_tools: getEnabledTools(),
+                };
+
+                const response = await fetch("/v1/chat/completions", {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload),
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + getAuthToken()
+                    },
+                    body: JSON.stringify(openaiPayload),
                     signal: currentAbortController.signal
                 });
 
@@ -1820,6 +1864,7 @@ HTML_TEMPLATE = """
 
                 agentDiv = appendMessage('', false);
 
+                // --- 解析 OpenAI SSE 流式响应 ---
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let buffer = '';
@@ -1834,20 +1879,26 @@ HTML_TEMPLATE = """
 
                     for (const line of lines) {
                         if (!line.startsWith('data: ')) continue;
-                        const payload = line.slice(6);
-                        if (payload === '[DONE]') continue;
+                        const data = line.slice(6).trim();
+                        if (data === '[DONE]') continue;
 
-                        const text = payload.replace(/\\\\n/g, '\\n').replace(/\\\\\\\\/g, '\\\\');
-                        fullText += text;
-
-                        agentDiv.innerHTML = marked.parse(fullText);
-                        agentDiv.querySelectorAll('pre code').forEach((block) => {
-                            if (!block.dataset.highlighted) {
-                                hljs.highlightElement(block);
-                                block.dataset.highlighted = 'true';
+                        try {
+                            const chunk = JSON.parse(data);
+                            const delta = chunk.choices && chunk.choices[0] && chunk.choices[0].delta;
+                            if (delta && delta.content) {
+                                fullText += delta.content;
+                                agentDiv.innerHTML = marked.parse(fullText);
+                                agentDiv.querySelectorAll('pre code').forEach((block) => {
+                                    if (!block.dataset.highlighted) {
+                                        hljs.highlightElement(block);
+                                        block.dataset.highlighted = 'true';
+                                    }
+                                });
+                                chatBox.scrollTop = chatBox.scrollHeight;
                             }
-                        });
-                        chatBox.scrollTop = chatBox.scrollHeight;
+                        } catch(e) {
+                            // 跳过无法解析的 chunk
+                        }
                     }
                 }
 
@@ -2474,7 +2525,7 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('fetch', event => {
     // Network-first strategy for API calls, cache-first for static assets
-    if (event.request.url.includes('/proxy_') || event.request.url.includes('/ask')) {
+    if (event.request.url.includes('/proxy_') || event.request.url.includes('/ask') || event.request.url.includes('/v1/')) {
         event.respondWith(
             fetch(event.request).catch(() => caches.match(event.request))
         );
@@ -2499,6 +2550,65 @@ self.addEventListener('fetch', event => {
     )
 
 
+@app.route("/v1/chat/completions", methods=["POST", "OPTIONS"])
+def proxy_openai_completions():
+    """OpenAI 兼容端点透传：前端直接发 OpenAI 格式，原样转发到后端"""
+    if request.method == "OPTIONS":
+        # CORS preflight
+        resp = Response("", status=204)
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        return resp
+
+    # 直接透传请求体和 Authorization header 到后端
+    auth_header = request.headers.get("Authorization", "")
+    try:
+        r = requests.post(
+            LOCAL_OPENAI_COMPLETIONS_URL,
+            json=request.get_json(silent=True),
+            headers={
+                "Authorization": auth_header,
+                "Content-Type": "application/json",
+            },
+            stream=True,
+            timeout=120,
+        )
+        if r.status_code != 200:
+            return Response(r.content, status=r.status_code, content_type=r.headers.get("content-type", "application/json"))
+
+        # 判断是否是流式响应
+        content_type = r.headers.get("content-type", "")
+        if "text/event-stream" in content_type:
+            def generate():
+                for chunk in r.iter_content(chunk_size=None):
+                    if chunk:
+                        yield chunk
+            return Response(
+                generate(),
+                mimetype="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
+        else:
+            return Response(r.content, status=r.status_code, content_type=content_type)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/v1/models", methods=["GET"])
+def proxy_openai_models():
+    """透传 /v1/models"""
+    try:
+        r = requests.get(f"http://127.0.0.1:{PORT_AGENT}/v1/models", timeout=10)
+        return Response(r.content, status=r.status_code, content_type=r.headers.get("content-type", "application/json"))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/proxy_login", methods=["POST"])
 def proxy_login():
     """代理登录请求到后端 Agent"""
@@ -2519,7 +2629,7 @@ def proxy_login():
 
 @app.route("/proxy_ask", methods=["POST"])
 def proxy_ask():
-    # 从 Flask session 中获取已验证的用户信息
+    """[已弃用] 非流式代理，请改用 /v1/chat/completions (stream=false)"""
     user_id = session.get("user_id")
     password = session.get("password")
     if not user_id or not password:
@@ -2527,27 +2637,50 @@ def proxy_ask():
 
     user_content = request.json.get("content")
     images = request.json.get("images")
-    
-    payload = {
-        "user_id": user_id,
-        "password": password,
-        "text": user_content
-    }
+
+    # 构造 content parts
+    content_parts = []
+    if user_content:
+        content_parts.append({"type": "text", "text": user_content})
     if images:
-        payload["images"] = images
-    
+        for img_data in images:
+            content_parts.append({"type": "image_url", "image_url": {"url": img_data}})
+
+    if len(content_parts) == 1 and content_parts[0]["type"] == "text":
+        msg_content = content_parts[0]["text"]
+    elif content_parts:
+        msg_content = content_parts
+    else:
+        msg_content = "(空消息)"
+
+    openai_payload = {
+        "model": "mini-timebot",
+        "messages": [{"role": "user", "content": msg_content}],
+        "stream": False,
+        "user": user_id,
+        "password": password,
+    }
+
     try:
-        r = requests.post(LOCAL_AGENT_URL, json=payload, timeout=120)
+        r = requests.post(
+            LOCAL_OPENAI_COMPLETIONS_URL,
+            json=openai_payload,
+            headers={"Authorization": f"Bearer {user_id}:{password}"},
+            timeout=120,
+        )
         if r.status_code == 401:
             session.clear()
             return jsonify(r.json()), 401
-        return jsonify(r.json())
+        resp = r.json()
+        # 从 OpenAI 格式提取 content 转为原格式
+        content = resp.get("choices", [{}])[0].get("message", {}).get("content", "")
+        return jsonify({"status": "success", "response": content})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/proxy_ask_stream", methods=["POST"])
 def proxy_ask_stream():
-    """流式代理：将 Agent 的 SSE 响应透传给前端"""
+    """[已弃用] 流式代理，请改用 /v1/chat/completions (stream=true)"""
     user_id = session.get("user_id")
     password = session.get("password")
     if not user_id or not password:
@@ -2566,22 +2699,67 @@ def proxy_ask_stream():
     files = data.get("files")    # None or list of {name, content}
     audios = data.get("audios")  # None or list of {base64, name, format}
     print(f"[proxy_ask_stream] 收到请求: text={bool(user_content)}, images={len(images) if images else 0}, files={len(files) if files else 0}, audios={len(audios) if audios else 0}")
-    payload = {
-        "user_id": user_id,
-        "password": password,
-        "text": user_content,
-        "enabled_tools": enabled_tools,
-        "session_id": session_id,
-    }
+
+    # 构造 OpenAI 格式的 messages content parts
+    content_parts = []
+    if user_content:
+        content_parts.append({"type": "text", "text": user_content})
+
+    # 图片 → image_url parts
     if images:
-        payload["images"] = images
-    if files:
-        payload["files"] = files
+        for img_data in images:
+            content_parts.append({"type": "image_url", "image_url": {"url": img_data}})
+
+    # 音频 → input_audio parts
     if audios:
-        payload["audios"] = audios
+        for audio in audios:
+            content_parts.append({
+                "type": "input_audio",
+                "input_audio": {
+                    "data": audio.get("base64", ""),
+                    "format": audio.get("format", "webm"),
+                },
+            })
+
+    # 文件 → file parts
+    if files:
+        for f in files:
+            fname = f.get("name", "file")
+            fcontent = f.get("content", "")
+            ftype = f.get("type", "text")
+            file_data_uri = fcontent if fcontent.startswith("data:") else f"data:application/octet-stream;base64,{fcontent}"
+            content_parts.append({
+                "type": "file",
+                "file": {"filename": fname, "file_data": file_data_uri},
+            })
+
+    # 如果只有纯文本，content 直接用字符串
+    if len(content_parts) == 1 and content_parts[0]["type"] == "text":
+        msg_content = content_parts[0]["text"]
+    elif content_parts:
+        msg_content = content_parts
+    else:
+        msg_content = "(空消息)"
+
+    # 构造 OpenAI 格式请求
+    openai_payload = {
+        "model": "mini-timebot",
+        "messages": [{"role": "user", "content": msg_content}],
+        "stream": True,
+        "user": user_id,
+        "password": password,
+        "session_id": session_id,
+        "enabled_tools": enabled_tools,
+    }
 
     try:
-        r = requests.post(LOCAL_AGENT_STREAM_URL, json=payload, stream=True, timeout=120)
+        r = requests.post(
+            LOCAL_OPENAI_COMPLETIONS_URL,
+            json=openai_payload,
+            headers={"Authorization": f"Bearer {user_id}:{password}"},
+            stream=True,
+            timeout=120,
+        )
         if r.status_code == 401:
             session.clear()
             return jsonify({"error": "认证失败"}), 401
@@ -2589,9 +2767,26 @@ def proxy_ask_stream():
             return jsonify({"error": f"Agent 返回 {r.status_code}"}), r.status_code
 
         def generate():
+            """将 OpenAI SSE 格式转为前端期望的简单 SSE 格式"""
+            import json as _json
             for line in r.iter_lines(decode_unicode=True):
-                if line:
-                    yield line + "\n\n"
+                if not line:
+                    continue
+                if line.startswith("data: [DONE]"):
+                    yield "data: [DONE]\n\n"
+                    continue
+                if line.startswith("data: "):
+                    try:
+                        chunk = _json.loads(line[6:])
+                        delta = chunk.get("choices", [{}])[0].get("delta", {})
+                        content = delta.get("content", "")
+                        if content:
+                            # 转换为前端期望的简单 SSE 格式
+                            text = content.replace("\\", "\\\\").replace("\n", "\\n")
+                            yield f"data: {text}\n\n"
+                    except _json.JSONDecodeError:
+                        # 透传无法解析的行
+                        yield line + "\n\n"
 
         return Response(
             generate(),

@@ -4,14 +4,17 @@ import hashlib
 import asyncio
 import secrets
 import base64
+import time
+import uuid
 from contextlib import asynccontextmanager
 
 import aiosqlite
 import httpx
 from fastapi import FastAPI, HTTPException, Header
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field
+from typing import Optional, Any
 import uvicorn
 
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
@@ -113,6 +116,16 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
+# --- CORS: 允许前端直连 ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
+
 
 # --- Request models ---
 class LoginRequest(BaseModel):
@@ -145,6 +158,41 @@ class OasisAskRequest(BaseModel):
     topic: str = "未知议题"
     history: list[dict] = []
     user_id: str = "oasis_external"
+
+
+# ------------------------------------------------------------------
+# OpenAI-compatible request/response models
+# ------------------------------------------------------------------
+
+class ChatMessageContent(BaseModel):
+    """OpenAI 消息内容部分（text / image_url / input_audio / file）"""
+    type: str
+    text: Optional[str] = None
+    image_url: Optional[dict] = None
+    input_audio: Optional[dict] = None
+    file: Optional[dict] = None
+
+class ChatMessage(BaseModel):
+    """OpenAI 格式的消息"""
+    role: str  # "system" | "user" | "assistant" | "tool"
+    content: Optional[Any] = None  # str 或 list[ChatMessageContent]
+    name: Optional[str] = None
+    tool_calls: Optional[list[dict]] = None
+    tool_call_id: Optional[str] = None
+
+class ChatCompletionRequest(BaseModel):
+    """OpenAI /v1/chat/completions 请求格式"""
+    model: Optional[str] = None
+    messages: list[ChatMessage]
+    stream: bool = False
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+    # 扩展字段：认证 & 会话
+    user: Optional[str] = None  # user_id
+    # 自定义扩展（通过 extra_body 传入）
+    session_id: Optional[str] = "default"
+    password: Optional[str] = None
+    enabled_tools: Optional[list[str]] = None
 
 
 def _decode_pdf_data_uri(data_uri: str) -> bytes:
@@ -295,8 +343,9 @@ async def login(req: LoginRequest):
     raise HTTPException(status_code=401, detail="用户名或密码错误")
 
 
-@app.post("/ask")
+@app.post("/ask", deprecated=True)
 async def ask_agent(req: UserRequest):
+    """[已弃用] 请使用 POST /v1/chat/completions (非流式, stream=false)"""
     if not verify_password(req.user_id, req.password):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
@@ -315,8 +364,9 @@ async def ask_agent(req: UserRequest):
     return {"status": "success", "response": result["messages"][-1].content}
 
 
-@app.post("/ask_stream")
+@app.post("/ask_stream", deprecated=True)
 async def ask_agent_stream(req: UserRequest):
+    """[已弃用] 请使用 POST /v1/chat/completions (流式, stream=true)"""
     if not verify_password(req.user_id, req.password):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
@@ -758,6 +808,307 @@ async def oasis_ask(req: OasisAskRequest, x_internal_token: str | None = Header(
             "expert_name": "MiniTimeBot",
             "status": "error",
         }
+
+
+# ------------------------------------------------------------------
+# OpenAI-compatible API: /v1/chat/completions
+# ------------------------------------------------------------------
+
+def _openai_msg_to_human_message(msg: ChatMessage) -> HumanMessage:
+    """将 OpenAI 格式的 user message 转为 LangChain HumanMessage。
+    支持纯文本和多模态（图片、音频、文件）content parts。"""
+    content = msg.content
+    if content is None:
+        return HumanMessage(content="(空消息)")
+    if isinstance(content, str):
+        return HumanMessage(content=content)
+
+    # content 是 list[dict]，遍历构造多模态 parts
+    text_parts = []
+    image_parts = []
+    audio_parts = []
+    file_parts = []
+    for part in content:
+        p = part if isinstance(part, dict) else part.dict()
+        ptype = p.get("type", "")
+        if ptype == "text":
+            text_parts.append(p.get("text", ""))
+        elif ptype == "image_url":
+            image_parts.append(p)
+        elif ptype == "input_audio":
+            audio_data = p.get("input_audio", {})
+            audio_parts.append(audio_data)
+        elif ptype == "file":
+            file_parts.append(p)
+
+    # 纯文本
+    if not image_parts and not audio_parts and not file_parts:
+        return HumanMessage(content="\n".join(text_parts) or "(空消息)")
+
+    # 多模态：用 _build_human_message 的逻辑构造
+    combined_text = "\n".join(text_parts)
+
+    # 提取图片 base64 列表
+    images = []
+    for ip in image_parts:
+        url = ip.get("image_url", {}).get("url", "")
+        if url:
+            images.append(url)
+
+    # 提取音频列表
+    audios = []
+    for ad in audio_parts:
+        audios.append({
+            "base64": ad.get("data", ""),
+            "format": ad.get("format", "webm"),
+            "name": f"recording.{ad.get('format', 'webm')}",
+        })
+
+    # 提取文件列表
+    files = []
+    for fp in file_parts:
+        fdata = fp.get("file", {})
+        files.append({
+            "name": fdata.get("filename", "file"),
+            "content": fdata.get("file_data", ""),
+            "type": "pdf" if fdata.get("filename", "").endswith(".pdf") else "text",
+        })
+
+    return _build_human_message(combined_text, images or None, files or None, audios or None)
+
+
+def _make_completion_id() -> str:
+    return f"chatcmpl-{uuid.uuid4().hex[:24]}"
+
+
+def _make_openai_response(content: str, model: str = "mini-timebot",
+                          finish_reason: str = "stop") -> dict:
+    """构造标准 OpenAI chat completion 响应。"""
+    return {
+        "id": _make_completion_id(),
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": content,
+            },
+            "finish_reason": finish_reason,
+        }],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    }
+
+
+def _make_openai_chunk(content: str = "", model: str = "mini-timebot",
+                       finish_reason: str | None = None,
+                       completion_id: str = "") -> str:
+    """构造标准 OpenAI SSE chunk（streaming）。"""
+    delta = {}
+    if content:
+        delta["content"] = content
+    if finish_reason is None and not content:
+        delta["role"] = "assistant"
+    chunk = {
+        "id": completion_id,
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "delta": delta,
+            "finish_reason": finish_reason,
+        }],
+    }
+    return f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+
+
+def _auth_openai_request(req: ChatCompletionRequest, auth_header: str | None):
+    """从 OpenAI 请求中提取认证信息并验证。
+    支持两种方式：
+    1. Authorization: Bearer <user_id>:<password>
+    2. 请求体中的 user + password 字段
+    """
+    user_id = req.user
+    password = req.password
+
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+        if ":" in token:
+            user_id, password = token.split(":", 1)
+        elif token == INTERNAL_TOKEN:
+            # 内部服务通信，跳过密码验证
+            return user_id or "system", True
+
+    if not user_id or not password:
+        return None, False
+    if not verify_password(user_id, password):
+        return None, False
+    return user_id, True
+
+
+@app.post("/v1/chat/completions")
+async def openai_chat_completions(
+    req: ChatCompletionRequest,
+    authorization: str | None = Header(None),
+):
+    """OpenAI 兼容的 /v1/chat/completions 端点。
+
+    认证方式（任选其一）：
+    - Header: Authorization: Bearer <user_id>:<password>
+    - Header: Authorization: Bearer <INTERNAL_TOKEN>  (内部服务通信)
+    - Body: user + password 字段
+
+    请求格式完全兼容 OpenAI API，扩展字段通过顶层或 extra_body 传入：
+    - session_id: 会话 ID (默认 "default")
+    - enabled_tools: 启用的工具列表 (null=全部)
+    """
+    user_id, authenticated = _auth_openai_request(req, authorization)
+    if not authenticated:
+        raise HTTPException(status_code=401, detail="认证失败")
+
+    session_id = req.session_id or "default"
+    thread_id = f"{user_id}#{session_id}"
+    config = {"configurable": {"thread_id": thread_id}}
+
+    # 只取最后一条 user message 作为当前输入（LangGraph 有 checkpoint 记忆）
+    last_user_msg = None
+    for msg in reversed(req.messages):
+        if msg.role == "user":
+            last_user_msg = msg
+            break
+
+    if not last_user_msg:
+        raise HTTPException(status_code=400, detail="messages 中缺少 user 消息")
+
+    human_msg = _openai_msg_to_human_message(last_user_msg)
+
+    user_input = {
+        "messages": [human_msg],
+        "trigger_source": "user",
+        "enabled_tools": req.enabled_tools,
+        "user_id": user_id,
+        "session_id": session_id,
+    }
+
+    model_name = req.model or "mini-timebot"
+
+    # --- 非流式 ---
+    if not req.stream:
+        result = await agent.agent_app.ainvoke(user_input, config)
+        reply = result["messages"][-1].content
+        return _make_openai_response(reply, model=model_name)
+
+    # --- 流式 (SSE) ---
+    task_key = f"{user_id}#{session_id}"
+    await agent.cancel_task(task_key)
+
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+    completion_id = _make_completion_id()
+
+    async def _stream_worker():
+        collected_tokens = []
+        try:
+            # 发送 role chunk
+            await queue.put(_make_openai_chunk("", model=model_name, completion_id=completion_id))
+
+            async for event in agent.agent_app.astream_events(user_input, config, version="v2"):
+                kind = event.get("event", "")
+                if kind == "on_chat_model_stream":
+                    chunk = event.get("data", {}).get("chunk")
+                    if chunk and hasattr(chunk, "content") and chunk.content:
+                        collected_tokens.append(chunk.content)
+                        await queue.put(_make_openai_chunk(
+                            chunk.content, model=model_name, completion_id=completion_id))
+                elif kind == "on_tool_start":
+                    tool_name = event.get("name", "")
+                    await queue.put(_make_openai_chunk(
+                        f"\n🔧 调用工具: {tool_name}...\n",
+                        model=model_name, completion_id=completion_id))
+                elif kind == "on_tool_end":
+                    await queue.put(_make_openai_chunk(
+                        f"\n✅ 工具执行完成\n",
+                        model=model_name, completion_id=completion_id))
+
+            # finish
+            await queue.put(_make_openai_chunk(
+                "", model=model_name, finish_reason="stop", completion_id=completion_id))
+            await queue.put("data: [DONE]\n\n")
+        except asyncio.CancelledError:
+            try:
+                snapshot = await agent.agent_app.aget_state(config)
+                last_msgs = snapshot.values.get("messages", [])
+                if last_msgs:
+                    last_msg_item = last_msgs[-1]
+                    if hasattr(last_msg_item, "tool_calls") and last_msg_item.tool_calls:
+                        tool_messages = [
+                            ToolMessage(
+                                content="⚠️ 工具调用被用户终止",
+                                tool_call_id=tc["id"],
+                            )
+                            for tc in last_msg_item.tool_calls
+                        ]
+                        await agent.agent_app.aupdate_state(config, {"messages": tool_messages})
+            except Exception:
+                pass
+            partial_text = "".join(collected_tokens)
+            if partial_text:
+                partial_text += "\n\n⚠️ （回复被用户终止）"
+                partial_msg = AIMessage(content=partial_text)
+                await agent.agent_app.aupdate_state(config, {"messages": [partial_msg]})
+            await queue.put(_make_openai_chunk(
+                "\n\n⚠️ 已终止思考", model=model_name, completion_id=completion_id))
+            await queue.put(_make_openai_chunk(
+                "", model=model_name, finish_reason="stop", completion_id=completion_id))
+            await queue.put("data: [DONE]\n\n")
+        except Exception as e:
+            await queue.put(_make_openai_chunk(
+                f"\n❌ 响应异常: {str(e)}", model=model_name, completion_id=completion_id))
+            await queue.put(_make_openai_chunk(
+                "", model=model_name, finish_reason="stop", completion_id=completion_id))
+            await queue.put("data: [DONE]\n\n")
+        finally:
+            await queue.put(None)
+            agent.unregister_task(task_key)
+
+    task = asyncio.create_task(_stream_worker())
+    agent.register_task(task_key, task)
+
+    async def event_generator():
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            yield item
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ------------------------------------------------------------------
+# OpenAI-compatible: /v1/models (列出可用模型)
+# ------------------------------------------------------------------
+
+@app.get("/v1/models")
+async def list_models():
+    """返回可用模型列表（OpenAI 兼容）"""
+    return {
+        "object": "list",
+        "data": [{
+            "id": "mini-timebot",
+            "object": "model",
+            "created": int(time.time()),
+            "owned_by": "mini-timebot",
+        }],
+    }
 
 
 if __name__ == "__main__":
