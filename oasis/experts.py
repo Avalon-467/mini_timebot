@@ -157,7 +157,7 @@ def _get_llm(temperature: float = 0.7) -> ChatOpenAI:
         raise ValueError("LLM_API_KEY not found in environment variables.")
     return ChatOpenAI(
         model=os.getenv("LLM_MODEL", "deepseek-chat"),
-        base_url=os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1"),
+        base_url=os.getenv("LLM_BASE_URL", "https://api.deepseek.com"),
         api_key=api_key,
         temperature=temperature,
         max_tokens=1024,

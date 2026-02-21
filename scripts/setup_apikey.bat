@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul 2>&1
 
-:: LLM API Key 配置脚本（支持 DeepSeek / OpenAI / Gemini 等 OpenAI 兼容接口）
+:: LLM API Key 配置脚本（支持 DeepSeek / OpenAI / Gemini / Claude 等，含厂商路由与中转代理）
 
 cd /d "%~dp0\.."
 
@@ -35,7 +35,8 @@ if /i not "%RESET%"=="y" (
 :ask_key
 echo ================================================
 echo   需要配置 LLM API Key 才能使用
-echo   支持 DeepSeek / OpenAI / Gemini 等
+echo   支持 DeepSeek / OpenAI / Gemini / Claude 等
+echo   （自动根据模型名路由厂商，也支持中转代理）
 echo ================================================
 echo.
 
@@ -47,8 +48,8 @@ if "%API_KEY%"=="" (
     exit /b 1
 )
 
-set /p BASE_URL=请输入 API Base URL（回车默认 https://api.deepseek.com/v1）: 
-if "%BASE_URL%"=="" set "BASE_URL=https://api.deepseek.com/v1"
+set /p BASE_URL=请输入 API Base URL（回车默认 https://api.deepseek.com，不要带 /v1）: 
+if "%BASE_URL%"=="" set "BASE_URL=https://api.deepseek.com"
 
 set /p MODEL_NAME=请输入模型名称（回车默认 deepseek-chat）: 
 if "%MODEL_NAME%"=="" set "MODEL_NAME=deepseek-chat"

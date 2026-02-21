@@ -27,6 +27,24 @@ patch_langchain_file_mime()
 
 from agent import MiniTimeAgent
 
+
+def _extract_text(content) -> str:
+    """从 AIMessage.content 提取纯文本。
+    ChatGoogleGenerativeAI 返回 list[dict]，ChatOpenAI 返回 str。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                if block.get("type") == "text":
+                    parts.append(block.get("text", ""))
+            # 跳过 thought_signature 等非文本 block
+        return "".join(parts)
+    return str(content)
+
 # --- Path setup ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(current_dir)
@@ -361,7 +379,7 @@ async def ask_agent(req: UserRequest):
     }
 
     result = await agent.agent_app.ainvoke(user_input, config)
-    return {"status": "success", "response": result["messages"][-1].content}
+    return {"status": "success", "response": _extract_text(result["messages"][-1].content)}
 
 
 @app.post("/ask_stream", deprecated=True)
@@ -396,9 +414,11 @@ async def ask_agent_stream(req: UserRequest):
                 if kind == "on_chat_model_stream":
                     chunk = event.get("data", {}).get("chunk")
                     if chunk and hasattr(chunk, "content") and chunk.content:
-                        collected_tokens.append(chunk.content)
-                        text = chunk.content.replace("\\", "\\\\").replace("\n", "\\n")
-                        await queue.put(f"data: {text}\n\n")
+                        text = _extract_text(chunk.content)
+                        if text:
+                            collected_tokens.append(text)
+                            text = text.replace("\\", "\\\\").replace("\n", "\\n")
+                            await queue.put(f"data: {text}\n\n")
                 elif kind == "on_tool_start":
                     tool_name = event.get("name", "")
                     await queue.put(f"data: \\n🔧 调用工具: {tool_name}...\\n\n\n")
@@ -638,7 +658,7 @@ async def get_session_history(req: SessionHistoryRequest):
             content = m.content
             result.append({"role": "user", "content": content})
         elif msg_type == "AIMessage":
-            content = m.content if isinstance(m.content, str) else str(m.content)
+            content = _extract_text(m.content)
             # 提取 tool_calls 信息
             tool_calls = []
             if hasattr(m, "tool_calls") and m.tool_calls:
@@ -653,7 +673,7 @@ async def get_session_history(req: SessionHistoryRequest):
                     entry["tool_calls"] = tool_calls
                 result.append(entry)
         elif msg_type == "ToolMessage":
-            content = m.content if isinstance(m.content, str) else str(m.content)
+            content = _extract_text(m.content)
             tool_name = getattr(m, "name", "")
             result.append({
                 "role": "tool",
@@ -1007,9 +1027,9 @@ async def openai_chat_completions(
         ext_tool_calls = _format_tool_calls_for_openai(last_msg, external_tool_names)
         if ext_tool_calls:
             return _make_openai_response(
-                last_msg.content or "", model=model_name, tool_calls=ext_tool_calls)
+                _extract_text(last_msg.content), model=model_name, tool_calls=ext_tool_calls)
 
-        reply = last_msg.content if isinstance(last_msg.content, str) else str(last_msg.content)
+        reply = _extract_text(last_msg.content)
         return _make_openai_response(reply, model=model_name)
 
     # --- 流式 (SSE) ---
@@ -1030,9 +1050,11 @@ async def openai_chat_completions(
                 if kind == "on_chat_model_stream":
                     chunk = event.get("data", {}).get("chunk")
                     if chunk and hasattr(chunk, "content") and chunk.content:
-                        collected_tokens.append(chunk.content)
-                        await queue.put(_make_openai_chunk(
-                            chunk.content, model=model_name, completion_id=completion_id))
+                        text = _extract_text(chunk.content)
+                        if text:
+                            collected_tokens.append(text)
+                            await queue.put(_make_openai_chunk(
+                            text, model=model_name, completion_id=completion_id))
                 elif kind == "on_tool_start":
                     tool_name = event.get("name", "")
                     if tool_name not in external_tool_names:

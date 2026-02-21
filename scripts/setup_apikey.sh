@@ -1,5 +1,5 @@
 #!/bin/bash
-# LLM API Key 配置脚本（支持 DeepSeek / OpenAI / Gemini 等 OpenAI 兼容接口）
+# LLM API Key 配置脚本（支持 DeepSeek / OpenAI / Gemini / Claude 等，含厂商路由与中转代理）
 
 cd "$(dirname "$0")/.."
 
@@ -21,7 +21,8 @@ fi
 
 echo "================================================"
 echo "  需要配置 LLM API Key 才能使用"
-echo "  支持 DeepSeek / OpenAI / Gemini 等"
+echo "  支持 DeepSeek / OpenAI / Gemini / Claude 等"
+echo "  （自动根据模型名路由厂商，也支持中转代理）"
 echo "================================================"
 echo ""
 
@@ -33,8 +34,8 @@ if [ -z "$api_key" ]; then
     return 1 2>/dev/null || exit 1
 fi
 
-read -p "请输入 API Base URL（回车默认 https://api.deepseek.com/v1）: " base_url
-base_url=${base_url:-https://api.deepseek.com/v1}
+read -p "请输入 API Base URL（回车默认 https://api.deepseek.com，不要带 /v1）: " base_url
+base_url=${base_url:-https://api.deepseek.com}
 
 read -p "请输入模型名称（回车默认 deepseek-chat）: " model_name
 model_name=${model_name:-deepseek-chat}
