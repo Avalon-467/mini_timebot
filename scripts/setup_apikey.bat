@@ -64,35 +64,35 @@ if exist "%ENV_FILE%" (
     :: 更新 LLM_API_KEY
     findstr /i "^LLM_API_KEY=" "%ENV_FILE%" >nul 2>&1
     if %errorlevel%==0 (
-        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^LLM_API_KEY=.*', 'LLM_API_KEY=%API_KEY%' | Set-Content '%ENV_FILE%'"
+        powershell -Command "$c=[System.IO.File]::ReadAllText('%ENV_FILE%',[System.Text.Encoding]::UTF8); $c=$c -replace '(?m)^LLM_API_KEY=.*','LLM_API_KEY=%API_KEY%'; [System.IO.File]::WriteAllText('%ENV_FILE%',$c,(New-Object System.Text.UTF8Encoding $false))"
     ) else (
         echo LLM_API_KEY=%API_KEY%>> "%ENV_FILE%"
     )
     :: 更新 LLM_BASE_URL
     findstr /i "^LLM_BASE_URL=" "%ENV_FILE%" >nul 2>&1
     if %errorlevel%==0 (
-        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^LLM_BASE_URL=.*', 'LLM_BASE_URL=%BASE_URL%' | Set-Content '%ENV_FILE%'"
+        powershell -Command "$c=[System.IO.File]::ReadAllText('%ENV_FILE%',[System.Text.Encoding]::UTF8); $c=$c -replace '(?m)^LLM_BASE_URL=.*','LLM_BASE_URL=%BASE_URL%'; [System.IO.File]::WriteAllText('%ENV_FILE%',$c,(New-Object System.Text.UTF8Encoding $false))"
     ) else (
         echo LLM_BASE_URL=%BASE_URL%>> "%ENV_FILE%"
     )
     :: 更新 LLM_MODEL
     findstr /i "^LLM_MODEL=" "%ENV_FILE%" >nul 2>&1
     if %errorlevel%==0 (
-        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^LLM_MODEL=.*', 'LLM_MODEL=%MODEL_NAME%' | Set-Content '%ENV_FILE%'"
+        powershell -Command "$c=[System.IO.File]::ReadAllText('%ENV_FILE%',[System.Text.Encoding]::UTF8); $c=$c -replace '(?m)^LLM_MODEL=.*','LLM_MODEL=%MODEL_NAME%'; [System.IO.File]::WriteAllText('%ENV_FILE%',$c,(New-Object System.Text.UTF8Encoding $false))"
     ) else (
         echo LLM_MODEL=%MODEL_NAME%>> "%ENV_FILE%"
     )
     :: 更新 TTS_MODEL
     findstr /i "^TTS_MODEL=" "%ENV_FILE%" >nul 2>&1
     if %errorlevel%==0 (
-        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^TTS_MODEL=.*', 'TTS_MODEL=%TTS_MODEL%' | Set-Content '%ENV_FILE%'"
+        powershell -Command "$c=[System.IO.File]::ReadAllText('%ENV_FILE%',[System.Text.Encoding]::UTF8); $c=$c -replace '(?m)^TTS_MODEL=.*','TTS_MODEL=%TTS_MODEL%'; [System.IO.File]::WriteAllText('%ENV_FILE%',$c,(New-Object System.Text.UTF8Encoding $false))"
     ) else (
         echo TTS_MODEL=%TTS_MODEL%>> "%ENV_FILE%"
     )
     :: 更新 TTS_VOICE
     findstr /i "^TTS_VOICE=" "%ENV_FILE%" >nul 2>&1
     if %errorlevel%==0 (
-        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^TTS_VOICE=.*', 'TTS_VOICE=%TTS_VOICE%' | Set-Content '%ENV_FILE%'"
+        powershell -Command "$c=[System.IO.File]::ReadAllText('%ENV_FILE%',[System.Text.Encoding]::UTF8); $c=$c -replace '(?m)^TTS_VOICE=.*','TTS_VOICE=%TTS_VOICE%'; [System.IO.File]::WriteAllText('%ENV_FILE%',$c,(New-Object System.Text.UTF8Encoding $false))"
     ) else (
         echo TTS_VOICE=%TTS_VOICE%>> "%ENV_FILE%"
     )
@@ -100,11 +100,7 @@ if exist "%ENV_FILE%" (
     :: 首次创建：从模板复制再写入
     if exist "%EXAMPLE_FILE%" (
         copy /y "%EXAMPLE_FILE%" "%ENV_FILE%" >nul
-        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^LLM_API_KEY=.*', 'LLM_API_KEY=%API_KEY%' | Set-Content '%ENV_FILE%'"
-        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^LLM_BASE_URL=.*', 'LLM_BASE_URL=%BASE_URL%' | Set-Content '%ENV_FILE%'"
-        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^LLM_MODEL=.*', 'LLM_MODEL=%MODEL_NAME%' | Set-Content '%ENV_FILE%'"
-        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^# TTS_MODEL=.*', 'TTS_MODEL=%TTS_MODEL%' | Set-Content '%ENV_FILE%'"
-        powershell -Command "(Get-Content '%ENV_FILE%') -replace '^# TTS_VOICE=.*', 'TTS_VOICE=%TTS_VOICE%' | Set-Content '%ENV_FILE%'"
+        powershell -Command "$c=[System.IO.File]::ReadAllText('%ENV_FILE%',[System.Text.Encoding]::UTF8); $c=$c -replace '(?m)^LLM_API_KEY=.*','LLM_API_KEY=%API_KEY%'; $c=$c -replace '(?m)^LLM_BASE_URL=.*','LLM_BASE_URL=%BASE_URL%'; $c=$c -replace '(?m)^LLM_MODEL=.*','LLM_MODEL=%MODEL_NAME%'; $c=$c -replace '(?m)^# TTS_MODEL=.*','TTS_MODEL=%TTS_MODEL%'; $c=$c -replace '(?m)^# TTS_VOICE=.*','TTS_VOICE=%TTS_VOICE%'; [System.IO.File]::WriteAllText('%ENV_FILE%',$c,(New-Object System.Text.UTF8Encoding $false))"
     ) else (
         (
             echo LLM_API_KEY=%API_KEY%
