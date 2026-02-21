@@ -846,26 +846,32 @@ def _format_tool_calls_for_openai(ai_msg: AIMessage, external_names: set[str]) -
 
 def _auth_openai_request(req: ChatCompletionRequest, auth_header: str | None):
     """从 OpenAI 请求中提取认证信息并验证。
-    支持两种方式：
+    支持格式：
     1. Authorization: Bearer <user_id>:<password>
-    2. 请求体中的 user + password 字段
+    2. Authorization: Bearer <user_id>:<password>:<session_id>
+    3. Authorization: Bearer <INTERNAL_TOKEN>
+    4. 请求体中的 user + password 字段
+    返回 (user_id, authenticated, session_override)
     """
     user_id = req.user
     password = req.password
+    session_override = None
 
     if auth_header and auth_header.startswith("Bearer "):
         token = auth_header[7:]
-        if ":" in token:
-            user_id, password = token.split(":", 1)
+        parts = token.split(":")
+        if len(parts) >= 3:
+            user_id, password, session_override = parts[0], parts[1], parts[2]
+        elif len(parts) == 2:
+            user_id, password = parts[0], parts[1]
         elif token == INTERNAL_TOKEN:
-            # 内部服务通信，跳过密码验证
-            return user_id or "system", True
+            return user_id or "system", True, None
 
     if not user_id or not password:
-        return None, False
+        return None, False, None
     if not verify_password(user_id, password):
-        return None, False
-    return user_id, True
+        return None, False, None
+    return user_id, True, session_override
 
 
 @app.post("/v1/chat/completions")
@@ -877,20 +883,21 @@ async def openai_chat_completions(
 
     认证方式（任选其一）：
     - Header: Authorization: Bearer <user_id>:<password>
+    - Header: Authorization: Bearer <user_id>:<password>:<session_id>
     - Header: Authorization: Bearer <INTERNAL_TOKEN>  (内部服务通信)
     - Body: user + password 字段
 
     请求格式完全兼容 OpenAI API，扩展字段通过顶层或 extra_body 传入：
-    - session_id: 会话 ID (默认 "default")
+    - session_id: 会话 ID (默认 "default"，也可通过 key 第三段指定)
     - enabled_tools: 启用的工具列表 (null=全部)
     - tools: 外部工具定义（OpenAI function calling 格式）
     - tool_choice: 工具选择策略
     """
-    user_id, authenticated = _auth_openai_request(req, authorization)
+    user_id, authenticated, session_override = _auth_openai_request(req, authorization)
     if not authenticated:
         raise HTTPException(status_code=401, detail="认证失败")
 
-    session_id = req.session_id or "default"
+    session_id = session_override or req.session_id or "default"
     thread_id = f"{user_id}#{session_id}"
     config = {"configurable": {"thread_id": thread_id}}
 
