@@ -234,20 +234,25 @@ async def post_to_oasis(
     schedule_yaml: str = "",
     schedule_file: str = "",
     use_bot_session: bool = False,
+    detach: bool = False,
 ) -> str:
     """
-    Submit a question to the OASIS forum for multi-expert discussion.
-    Expert agents will debate the question, vote on each other's posts,
-    and produce a comprehensive conclusion.
+    Submit a question or work task to the OASIS forum for multi-expert collaboration.
 
-    Use this tool for complex questions that benefit from multiple perspectives,
-    such as strategy analysis, pros/cons evaluation, or controversial topics.
+    Two modes of operation:
+    1. **Discussion mode** (default, use_bot_session=False): Expert agents debate the question
+       with lightweight stateless LLM calls, vote on each other's posts, and produce a conclusion.
+       Best for: strategy analysis, pros/cons evaluation, controversial topics.
+    2. **Bot sub-agent mode** (use_bot_session=True): Experts run as stateful sub-agents with
+       tool-calling ability and memory across rounds. The `question` field serves as the **work task**
+       assigned to the sub-agents. The `schedule_yaml` defines not only speaking order but also
+       the **work execution order**. Best for: complex task flows requiring multi-agent collaboration.
 
     **Workflow**: call list_oasis_experts first to see available experts (including custom ones),
     then use expert_tags and schedule_yaml to control who participates and in what order.
 
     Args:
-        question: The question or topic to discuss
+        question: The question/topic to discuss, or the work task to assign to sub-agents (in bot session mode)
         username: (auto-injected) current user identity; do NOT set manually
         expert_tags: List of expert tags to include (e.g. ["creative", "critical", "my_custom_tag"]).
             Empty list = all experts (public + custom) participate.
@@ -269,12 +274,17 @@ async def post_to_oasis(
               - parallel: multiple experts speak simultaneously (use NAMEs)
               - all_experts: all selected experts speak
             repeat: true = repeat the plan each round; false = execute plan steps once across rounds
+            Note: in bot sub-agent mode, the plan defines the work execution order, not just speaking order
         schedule_file: Path to a YAML schedule file (alternative to schedule_yaml)
-        use_bot_session: If True, experts use full bot sessions (stateful, with tool-calling
-            ability and memory across rounds). Default False uses lightweight stateless LLM calls.
+        use_bot_session: If True, experts run as full bot sub-agents (stateful, with tool-calling
+            ability and memory across rounds). The question becomes a work task assigned to sub-agents,
+            and schedule_yaml defines the work execution order. Default False uses lightweight stateless LLM calls.
+        detach: If True, submit the task and return immediately with the topic_id without waiting
+            for the discussion/task to complete. Use check_oasis_discussion later to check progress
+            and retrieve the conclusion. Default False waits for the full conclusion.
 
     Returns:
-        The final conclusion summarizing the expert discussion
+        The final conclusion summarizing the expert discussion, or (if detach=True) the topic_id for later retrieval
     """
     effective_user = username or _FALLBACK_USER
     try:
@@ -301,6 +311,14 @@ async def post_to_oasis(
                 return f"❌ Failed to create topic: {resp.text}"
 
             topic_id = resp.json()["topic_id"]
+
+            if detach:
+                return (
+                    f"🏛️ OASIS 任务已提交（脱离模式）\n"
+                    f"主题: {question[:80]}\n"
+                    f"Topic ID: {topic_id}\n\n"
+                    f"💡 讨论/任务将在后台运行，稍后使用 check_oasis_discussion(topic_id=\"{topic_id}\") 查看进展和结论。"
+                )
 
             result = await client.get(
                 f"{OASIS_BASE_URL}/topics/{topic_id}/conclusion",
