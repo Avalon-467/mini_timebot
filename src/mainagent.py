@@ -313,10 +313,27 @@ def _build_human_message(text: str, images: list[str] | None = None, files: list
 # --- Routes ---
 
 @app.get("/tools")
-async def get_tools_list(x_internal_token: str | None = Header(None)):
-    """返回当前 Agent 加载的所有 MCP 工具信息（需要内部 token）"""
-    verify_internal_token(x_internal_token)
-    return {"status": "success", "tools": agent.get_tools_info()}
+async def get_tools_list(
+    x_internal_token: str | None = Header(None),
+    authorization: str | None = Header(None),
+):
+    """返回当前 Agent 加载的所有 MCP 工具信息。
+    认证方式（任选其一）：
+    - X-Internal-Token 头部
+    - Authorization: Bearer <user>:<password>
+    """
+    # 优先检查内部 token
+    if x_internal_token and x_internal_token == INTERNAL_TOKEN:
+        return {"status": "success", "tools": agent.get_tools_info()}
+    # 再检查 Bearer 用户认证
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization[7:]
+        parts = token.split(":")
+        if token == INTERNAL_TOKEN:
+            return {"status": "success", "tools": agent.get_tools_info()}
+        if len(parts) >= 2 and verify_password(parts[0], parts[1]):
+            return {"status": "success", "tools": agent.get_tools_info()}
+    raise HTTPException(status_code=403, detail="认证失败")
 
 
 @app.post("/login")
