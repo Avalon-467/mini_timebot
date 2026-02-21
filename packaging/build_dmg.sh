@@ -154,6 +154,18 @@ cp "${ROOT}/config/requirements.txt" "${RESOURCES}/config/"
 # 数据目录结构
 mkdir -p "${RESOURCES}/data/timeset"
 mkdir -p "${RESOURCES}/data/user_files"
+mkdir -p "${RESOURCES}/data/bark"
+mkdir -p "${RESOURCES}/data/oasis_user_experts"
+
+# 核心数据：prompts（系统 prompt + 专家定义，必需）
+if [ -d "${ROOT}/data/prompts" ]; then
+    cp -r "${ROOT}/data/prompts" "${RESOURCES}/data/prompts"
+fi
+
+# 调度示例模板
+if [ -d "${ROOT}/data/schedules" ]; then
+    cp -r "${ROOT}/data/schedules" "${RESOURCES}/data/schedules"
+fi
 
 # 许可证
 [ -f "${ROOT}/LICENSE" ] && cp "${ROOT}/LICENSE" "${RESOURCES}/"

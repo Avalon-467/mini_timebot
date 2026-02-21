@@ -65,9 +65,23 @@ Source: "..\config\users.json.example"; DestDir: "{app}\config"; Flags: ignoreve
 Source: "..\data\timeset\*"; DestDir: "{app}\data\timeset"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
 Source: "..\data\user_files\*"; DestDir: "{app}\data\user_files"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
 
+; 核心数据：prompts（系统 prompt + 专家定义，必需）
+Source: "..\data\prompts\*"; DestDir: "{app}\data\prompts"; Flags: ignoreversion recursesubdirs
+
+; 调度示例模板
+Source: "..\data\schedules\*"; DestDir: "{app}\data\schedules"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
+
+; 其他数据目录（运行时按需创建）
+Source: "..\data\bark\*"; DestDir: "{app}\data\bark"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
+Source: "..\data\oasis_user_experts\*"; DestDir: "{app}\data\oasis_user_experts"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
+
 [Dirs]
 Name: "{app}\data\timeset"
 Name: "{app}\data\user_files"
+Name: "{app}\data\prompts"
+Name: "{app}\data\schedules"
+Name: "{app}\data\bark"
+Name: "{app}\data\oasis_user_experts"
 Name: "{app}\config"
 
 [Icons]
