@@ -26,24 +26,7 @@ from api_patch import patch_langchain_file_mime, build_audio_part
 patch_langchain_file_mime()
 
 from agent import MiniTimeAgent
-
-
-def _extract_text(content) -> str:
-    """从 AIMessage.content 提取纯文本。
-    ChatGoogleGenerativeAI 返回 list[dict]，ChatOpenAI 返回 str。"""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict):
-                if block.get("type") == "text":
-                    parts.append(block.get("text", ""))
-            # 跳过 thought_signature 等非文本 block
-        return "".join(parts)
-    return str(content)
+from llm_factory import extract_text as _extract_text
 
 # --- Path setup ---
 current_dir = os.path.dirname(os.path.abspath(__file__))

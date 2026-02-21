@@ -11,9 +11,13 @@ Supports two modes:
 
 import asyncio
 import os
+import sys
 
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
+
+# 确保 src/ 在 import 路径中，以便导入 llm_factory
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
+from llm_factory import create_chat_model, extract_text
 
 from oasis.forum import DiscussionForum
 from oasis.experts import ExpertAgent, BotSessionExpert, EXPERT_CONFIGS, get_all_experts
@@ -31,23 +35,9 @@ except FileNotFoundError:
     _SUMMARY_PROMPT_TPL = ""
 
 
-def _get_summarizer() -> ChatOpenAI:
+def _get_summarizer():
     """Create a low-temperature LLM for reliable summarization."""
-    api_key = os.getenv("LLM_API_KEY")
-    if not api_key:
-        raise ValueError("LLM_API_KEY not found in environment variables.")
-    base_url = os.getenv("LLM_BASE_URL", "https://api.deepseek.com").strip()
-    # ChatOpenAI 需要 /v1 路径
-    openai_base = base_url.rstrip("/") + "/v1"
-    return ChatOpenAI(
-        model=os.getenv("LLM_MODEL", "deepseek-chat"),
-        base_url=openai_base,
-        api_key=api_key,
-        temperature=0.3,
-        max_tokens=2048,
-        timeout=60,
-        max_retries=2,
-    )
+    return create_chat_model(temperature=0.3, max_tokens=2048)
 
 
 class DiscussionEngine:
@@ -290,6 +280,6 @@ class DiscussionEngine:
 
         try:
             resp = await self.summarizer.ainvoke([HumanMessage(content=prompt)])
-            return resp.content
+            return extract_text(resp.content)
         except Exception as e:
             return f"总结生成失败: {str(e)}"

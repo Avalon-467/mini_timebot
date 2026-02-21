@@ -13,10 +13,14 @@ publishing their own views, and voting.
 
 import json
 import os
+import sys
 
 import httpx
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
+
+# 确保 src/ 在 import 路径中，以便导入 llm_factory
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
+from llm_factory import create_chat_model, extract_text
 
 from oasis.forum import DiscussionForum
 
@@ -150,23 +154,9 @@ except FileNotFoundError:
     _DISCUSS_PROMPT_TPL = ""
 
 
-def _get_llm(temperature: float = 0.7) -> ChatOpenAI:
-    """Create an LLM instance (reuses the same env config as main agent)."""
-    api_key = os.getenv("LLM_API_KEY")
-    if not api_key:
-        raise ValueError("LLM_API_KEY not found in environment variables.")
-    base_url = os.getenv("LLM_BASE_URL", "https://api.deepseek.com").strip()
-    # ChatOpenAI 需要 /v1 路径
-    openai_base = base_url.rstrip("/") + "/v1"
-    return ChatOpenAI(
-        model=os.getenv("LLM_MODEL", "deepseek-chat"),
-        base_url=openai_base,
-        api_key=api_key,
-        temperature=temperature,
-        max_tokens=1024,
-        timeout=60,
-        max_retries=2,
-    )
+def _get_llm(temperature: float = 0.7):
+    """Create an LLM instance (reuses the same env config & vendor routing as main agent)."""
+    return create_chat_model(temperature=temperature, max_tokens=1024)
 
 
 # ======================================================================
@@ -279,12 +269,13 @@ class ExpertAgent:
 
         try:
             resp = await self.llm.ainvoke([HumanMessage(content=prompt)])
-            result = _parse_expert_response(resp.content)
+            text = extract_text(resp.content)
+            result = _parse_expert_response(text)
             await _apply_response(result, self.name, forum, others)
         except json.JSONDecodeError as e:
             print(f"  [OASIS] ⚠️ {self.name} JSON parse error: {e}")
             try:
-                await forum.publish(author=self.name, content=resp.content.strip()[:300])
+                await forum.publish(author=self.name, content=extract_text(resp.content).strip()[:300])
             except Exception:
                 pass
         except Exception as e:

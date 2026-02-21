@@ -301,108 +301,12 @@ class MiniTimeAgent:
     # ------------------------------------------------------------------
     # Model factory
     # ------------------------------------------------------------------
-    # 模型名 -> 厂商 的自动推断映射
-    # 有专用包的用专用 provider，其余统一走 openai 兼容格式
-    _MODEL_PROVIDER_PATTERNS: dict[str, str] = {
-        # 有专用 LangChain 包的厂商
-        "gemini": "google",
-        "claude": "anthropic",
-        "deepseek": "deepseek",
-        # 以下统一走 ChatOpenAI（兼容 OpenAI 格式）
-        "gpt": "openai",
-        "o1": "openai",
-        "o3": "openai",
-        "o4": "openai",
-        "qwen": "openai",
-        "minimax": "openai",
-        "glm": "openai",
-        "moonshot": "openai",
-        "yi-": "openai",
-        "baichuan": "openai",
-        "doubao": "openai",
-        "hunyuan": "openai",
-        "ernie": "openai",
-        "mistral": "openai",
-        "llama": "openai",
-        "groq": "openai",
-    }
+    # 模型名 -> 厂商 映射已移至 src/llm_factory.py（全局共享）
 
     @staticmethod
     def _get_model() -> BaseChatModel:
-        api_key = os.getenv("LLM_API_KEY")
-        base_url = os.getenv("LLM_BASE_URL", "https://api.deepseek.com").strip()
-        model = os.getenv("LLM_MODEL", "deepseek-chat")
-        provider = os.getenv("LLM_PROVIDER", "").strip().lower()  # 优先显式指定
-        if not api_key:
-            raise ValueError("未检测到 LLM_API_KEY，请在环境变量中设置。")
-
-        # 1) 如果没有显式指定 LLM_PROVIDER，根据模型名自动推断
-        if not provider:
-            model_lower = model.lower()
-            for pattern, prov in MiniTimeAgent._MODEL_PROVIDER_PATTERNS.items():
-                if pattern in model_lower:
-                    provider = prov
-                    break
-            else:
-                provider = "openai"  # 默认 fallback
-
-        # 2) 根据 provider 构造对应的 ChatModel
-        #    base_url 同时支持直连和中转代理（代理需支持对应厂商的原生 API 路径）
-        if provider == "google":
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            kwargs = dict(
-                model=model,
-                google_api_key=api_key,
-                temperature=0.7,
-                max_output_tokens=2048,
-                timeout=60,
-                max_retries=2,
-            )
-            # 如果设置了 base_url，传给 google SDK 作为代理地址
-            # 代理需支持 Gemini 原生路径: /v1beta/models/{model}:{action}
-            if base_url:
-                kwargs["base_url"] = base_url
-            return ChatGoogleGenerativeAI(**kwargs)
-
-        if provider == "anthropic":
-            from langchain_anthropic import ChatAnthropic
-            kwargs = dict(
-                model=model,
-                api_key=api_key,
-                temperature=0.7,
-                max_tokens=2048,
-                timeout=60,
-                max_retries=2,
-            )
-            # 代理需支持 Claude 原生路径: /v1/messages
-            if base_url:
-                kwargs["base_url"] = base_url
-            return ChatAnthropic(**kwargs)
-
-        if provider == "deepseek":
-            from langchain_deepseek import ChatDeepSeek
-            return ChatDeepSeek(
-                model=model,
-                api_key=api_key,
-                base_url=base_url,
-                temperature=0.7,
-                max_tokens=2048,
-                timeout=60,
-                max_retries=2,
-            )
-
-        # 默认: OpenAI 兼容格式（适用于 OpenAI / Qwen / MiniMax / 其他第三方等）
-        # OpenAI 兼容接口需要 /v1 路径
-        openai_base = base_url.rstrip("/") + "/v1"
-        return ChatOpenAI(
-            model=model,
-            base_url=openai_base,
-            api_key=api_key,
-            temperature=0.7,
-            max_tokens=2048,
-            timeout=60,
-            max_retries=2,
-        )
+        from llm_factory import create_chat_model
+        return create_chat_model()
 
     # ------------------------------------------------------------------
     # Conditional edge: route internal tools vs external tools vs end
