@@ -1,62 +1,189 @@
+**[English](#english) | [中文](#中文)**
+
+---
+
+<a id="english"></a>
+
 # Mini TimeBot
 
-一个基于 LLM 的智能定时任务助手。用户可以通过自然语言与 AI 对话，设置、查询和删除定时任务/闹钟，同时支持联网搜索和个人文件管理。
+> **OpenAI-compatible AI Agent with a built-in programmable multi-expert orchestration engine and one-click public deployment.**
 
-## 架构概览
+Mini TimeBot exposes a standard `/v1/chat/completions` endpoint that any OpenAI-compatible client can call directly. Internally it integrates the **OASIS orchestration engine** — using YAML schedule definitions to flexibly compose expert roles, speaking orders, and collaboration patterns, breaking complex problems into multi-perspective debates, voting consensus, and automated summaries.
 
-项目由多个协作服务组成：
+## Highlights
 
-```
-浏览器 (聊天 UI + 登录页 + OASIS 论坛面板)
-    │  HTTP :51209
-    ▼
-front.py (Flask + Session)     ── 前端代理，渲染登录/聊天页面，管理会话凭证，代理 OASIS 请求
-    │  HTTP :51200
-    ▼
-mainagent.py (FastAPI + LangGraph)  ── 核心 AI Agent，集成 DeepSeek LLM + 对话记忆 + 密码认证
-    │  stdio (MCP)                      ├── POST /oasis/ask ── 外部 OASIS 调用入口（Token 鉴权）
-    ├── mcp_scheduler.py (FastMCP)  ── MCP 工具服务，暴露闹钟管理工具
-    │       │  HTTP :51201
-    │       ▼
-    ├── time.py (FastAPI + APScheduler)  ── 定时调度中心，管理 cron 任务
-    ├── mcp_search.py (FastMCP)    ── MCP 搜索服务，提供联网搜索（DuckDuckGo）
-    ├── mcp_filemanager.py (FastMCP) ── MCP 文件服务，提供用户文件管理
-    ├── mcp_oasis.py (FastMCP)    ── MCP OASIS 服务，提供多专家讨论接口
-    │                                 │  HTTP :51202
-    │                                 ▼
-    │                            oasis/server.py  ── OASIS 论坛服务，多专家并行讨论系统
-    ├── mcp_bark.py (FastMCP)     ── MCP 推送服务，提供 Bark 消息推送
-    └── mcp_commander.py (FastMCP) ── MCP 指令执行服务，提供命令/代码执行
-
-外部 OASIS 系统 ── POST /oasis/ask ──► mainagent.py ──► Agent 思考 ──► 返回专家意见
-```
-
-### 服务说明
-
-| 服务 | 端口 | 说明 |
-|------|------|------|
-| `src/front.py` | 51209 | Flask Web UI，提供登录页 + 聊天界面 + OASIS 论坛面板，通过 Session 管理用户凭证 |
-| `src/mainagent.py` | 51200 | 核心 AI Agent（LangGraph + DeepSeek），管理对话、工具调用与密码认证，同时提供 `/oasis/ask` 外部接入端点 |
-| `src/mcp_scheduler.py` | - | MCP 工具服务（Agent 子进程），提供 add_alarm / list_alarms / delete_alarm |
-| `src/mcp_search.py` | - | MCP 搜索服务（Agent 子进程），提供 web_search / web_news |
-| `src/mcp_filemanager.py` | - | MCP 文件服务（Agent 子进程），提供 list_files / read_file / write_file / append_file / delete_file |
-| `src/mcp_oasis.py` | - | MCP OASIS 服务（Agent 子进程），提供 post_to_oasis / check_oasis_discussion / list_oasis_topics |
-| `src/mcp_bark.py` | - | MCP 推送服务（Agent 子进程），提供 Bark 推送通知相关工具 |
-| `src/mcp_commander.py` | - | MCP 指令执行服务（Agent 子进程），提供 run_command / run_python_code |
-| `src/time.py` | 51201 | 定时任务调度中心（APScheduler），任务到期时回调 Agent |
-| `oasis/server.py` | 51202 | OASIS 论坛服务，独立 FastAPI 服务，管理多专家讨论 |
-| `test/chat.py` | - | 命令行测试客户端 |
-
-> **端口可配置**：在 `config/.env` 中设置 `PORT_SCHEDULER`、`PORT_AGENT`、`PORT_FRONTEND` 即可自定义端口，参考 `config/.env.example`。
-
-## 快速开始
-
-### 一键运行（推荐）
-
-**一站式脚本**，自动完成 环境配置 → API Key 配置 → 创建用户 → 启动服务，无需手动执行其他步骤：
+### 1. OpenAI-Compatible API
 
 ```bash
-# Linux / macOS（首次使用需赋予执行权限）
+curl http://127.0.0.1:51200/v1/chat/completions \
+  -H "Authorization: Bearer <user>:<password>" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"mini-timebot","messages":[{"role":"user","content":"Hello"}],"stream":true}'
+```
+
+- Fully compatible with OpenAI Chat Completions format, streaming & non-streaming
+- Multi-turn conversation, image input (Vision), audio input, file upload, TTS
+- Works with ChatBox, Open WebUI, Cursor, or any OpenAI-compatible client
+- Multi-user + multi-session isolation, SQLite-persisted conversation memory
+
+### 2. OASIS Orchestration — A Programmable Expert Collaboration Engine
+
+**This is the core design of the entire project.**
+
+Traditional multi-agent systems are either fully parallel or fixed pipelines, unable to adapt to different scenarios. The OASIS engine uses a concise **YAML schedule definition** that lets users (or the AI Agent itself) precisely orchestrate every step of expert collaboration:
+
+```yaml
+# Example: Creative and Critical experts clash first, then everyone summarizes
+version: 1
+repeat: true
+plan:
+  - expert: "Creative Expert"      # Single expert speaks sequentially
+  - expert: "Critical Expert"      # Immediately rebuts
+  - parallel:                      # Multiple experts speak in parallel
+      - "Economist"
+      - "Legal Expert"
+  - all_experts: true              # All participants speak simultaneously
+```
+
+#### Three Layers of Control
+
+| Dimension | Control | Description |
+|-----------|---------|-------------|
+| **Who participates** | `expert_tags` | Select from 10+ built-in experts + user-defined custom expert pool |
+| **How they discuss** | `schedule_yaml` | 4 step types freely combined (sequential / parallel / all / manual injection) |
+| **How deep** | `max_rounds` + `use_bot_session` | Control round depth; choose stateful (memory + tools) or stateless (lightweight & fast) |
+
+#### Four Schedule Step Types
+
+| Step Type | Format | Effect |
+|-----------|--------|--------|
+| `expert` | `- expert: "Name"` | Single expert speaks sequentially |
+| `parallel` | `- parallel: ["A", "B"]` | Multiple experts speak simultaneously |
+| `all_experts` | `- all_experts: true` | All selected experts speak at once |
+| `manual` | `- manual: {author: "Host", content: "..."}` | Inject fixed content (bypasses LLM) |
+
+Set `repeat: true` to loop the plan each round; `repeat: false` executes plan steps once then ends.
+
+#### Expert Pool
+
+**10 Built-in Public Experts:**
+
+| Expert | Tag | Temp | Role |
+|--------|-----|------|------|
+| 🎨 Creative Expert | `creative` | 0.9 | Finds opportunities, proposes visionary ideas |
+| 🔍 Critical Expert | `critical` | 0.3 | Spots risks, flaws, and logical fallacies |
+| 📊 Data Analyst | `data` | 0.5 | Data-driven, speaks with facts |
+| 🎯 Synthesis Advisor | `synthesis` | 0.5 | Integrates perspectives, proposes pragmatic plans |
+| 📈 Economist | `economist` | 0.5 | Macro/micro economic perspective |
+| ⚖️ Legal Expert | `lawyer` | 0.3 | Compliance and legal risk analysis |
+| 💰 Cost Controller | `cost_controller` | 0.4 | Budget-sensitive, cost reduction |
+| 📊 Revenue Planner | `revenue_planner` | 0.6 | Revenue maximization strategy |
+| 🚀 Entrepreneur | `entrepreneur` | 0.8 | 0-to-1 hands-on perspective |
+| 🧑 Common Person | `common_person` | 0.7 | Down-to-earth common sense feedback |
+
+**User-Defined Custom Experts:** Each user can create private experts (name, tag, persona, temperature) through the Agent, mixed with public experts, isolated per user.
+
+#### Discussion Mechanics
+
+Each expert per round:
+1. **Post** — Opinion within 200 characters, can reference an existing post
+2. **Vote** — Up/down vote on other posts
+
+Engine auto-executes:
+- **Consensus Detection** — Top-voted post reaches ≥70% expert approval → early termination
+- **Conclusion Generation** — Synthesizes Top 5 highest-voted posts via LLM summary
+
+#### Two Expert Running Modes
+
+| Mode | `use_bot_session` | Features |
+|------|-------------------|----------|
+| **Stateless** (default) | `False` | Lightweight & fast, independent LLM call per round, no memory, no tools |
+| **Stateful** | `True` | Each expert gets a persistent session with memory, can invoke search/file/code tools, sessions visible in frontend |
+
+### 3. One-Click Public Deployment
+
+Run a single command to expose the entire service to the internet — **zero configuration, no account needed**:
+
+```bash
+python scripts/tunnel.py
+```
+
+- Uses **Cloudflare Quick Tunnel** to automatically obtain a temporary `*.trycloudflare.com` domain
+- Auto-detects platform → downloads `cloudflared` if missing → starts tunnels → captures public URLs → writes to `.env`
+- Exposes both the **Web UI** (port 51209) and **Bark push service** (port 58010) simultaneously
+- Also available interactively via `run.sh` ("Deploy to public network? y/N")
+- Push notification click-through URLs are automatically configured — users can also override via AI chat
+
+#### Bidirectional OASIS
+
+The Agent has both "convene" and "participate" capabilities:
+
+| | 🏠 Internal OASIS (Convene) | 🌐 External OASIS (Participate) |
+|---|---|---|
+| **Initiator** | Agent calls `post_to_oasis` | External system sends message via OpenAI-compatible API |
+| **Participants** | Local expert pool | Multiple independent Agent nodes |
+| **Trigger** | User question → Agent decides | External request via `/v1/chat/completions` |
+| **Result** | Conclusion returned to user | Agent opinion returned in standard OpenAI response format |
+
+---
+
+## Architecture
+
+```
+Browser (Chat UI + Login + OASIS Panel)
+    │  HTTP :51209
+    ▼
+front.py (Flask + Session)     ── Frontend proxy, login/chat pages, session management
+    │  HTTP :51200
+    ▼
+mainagent.py (FastAPI + LangGraph)  ── OpenAI-compatible API + Core Agent
+    │  stdio (MCP)                      (External OASIS also via OpenAI API)
+    ├── mcp_scheduler.py   ── Alarm/scheduled task management
+    │       │  HTTP :51201
+    │       ▼
+    ├── time.py (APScheduler)  ── Scheduling center
+    ├── mcp_search.py      ── DuckDuckGo web search
+    ├── mcp_filemanager.py ── User file management (sandboxed)
+    ├── mcp_oasis.py       ── OASIS discussion + expert management
+    │       │  HTTP :51202
+    │       ▼
+    │   oasis/server.py    ── OASIS forum service (engine + expert pool)
+    ├── mcp_bark.py        ── Bark mobile push notifications
+    └── mcp_commander.py   ── Sandboxed command/code execution
+```
+
+### Ports
+
+| Service | Port | Description |
+|---------|------|-------------|
+| `front.py` | 51209 | Web UI (login + chat + OASIS panel) |
+| `mainagent.py` | 51200 | OpenAI-compatible API + Agent core |
+| `time.py` | 51201 | Scheduling center |
+| `oasis/server.py` | 51202 | OASIS forum service |
+
+> Ports configurable in `config/.env`.
+
+### MCP Toolset
+
+6 tool services integrated via MCP protocol. All `username` parameters are auto-injected, fully isolated between users:
+
+| Tool Service | Capability |
+|-------------|------------|
+| **Search** | DuckDuckGo web search |
+| **Scheduler** | Natural language alarms/reminders, Cron expressions |
+| **File Manager** | User file CRUD, path traversal protection |
+| **Commander** | Shell commands and Python code in secure sandbox |
+| **OASIS Forum** | Start discussions, check progress, manage custom experts |
+| **Bark Push** | Push notifications to iOS/macOS devices |
+
+---
+
+## Quick Start
+
+### One-Click Run (Recommended)
+
+```bash
+# Linux / macOS
 chmod +x run.sh
 ./run.sh
 
@@ -64,578 +191,500 @@ chmod +x run.sh
 run.bat
 ```
 
-脚本会依次执行：
-1. **环境配置** — 检查并安装 uv、创建虚拟环境、安装依赖（已完成则自动跳过）
-2. **API Key 配置** — 检查并引导输入 DeepSeek API Key（已配置则自动跳过）
-3. **用户管理** — 询问是否添加新用户（可跳过）
-4. **启动服务** — 拉起全部服务并打开 Web UI
+The script handles: environment setup → API Key config → create user → start all services.
 
-> 一切交给脚本处理，无需手动编辑任何配置文件。
-> 以下章节为手动分步操作说明，使用 `run.sh` / `run.bat` 可跳过。
+> Manual steps below can be skipped if using `run.sh` / `run.bat`.
 
-### 1. 环境配置
+### Manual Setup
 
-**一键配置（推荐）：**
-
-自动检查并安装 uv、创建虚拟环境、安装所有依赖：
+**1. Environment**
 
 ```bash
-# Linux / macOS（首次使用需赋予执行权限）
-chmod +x scripts/setup_env.sh
-scripts/setup_env.sh
+# Auto (recommended)
+scripts/setup_env.sh   # Linux/macOS
+scripts\setup_env.bat  # Windows
 
-# Windows
-scripts\setup_env.bat
-```
-
-**手动配置：**
-
-如需手动操作，推荐使用 [uv](https://docs.astral.sh/uv/) 管理 Python 环境，比 pip 快 10-100 倍。
-
-```bash
-# 安装 uv
-# Linux / macOS
-curl -LsSf https://astral.sh/uv/install.sh | sh
-# Windows (PowerShell)
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-
-# 创建虚拟环境（Python 3.11+）
+# Manual
 uv venv .venv --python 3.11
-
-# 激活虚拟环境
-# Linux / macOS
 source .venv/bin/activate
-# Windows (PowerShell)
-.venv\Scripts\Activate.ps1
-# Windows (CMD)
-.venv\Scripts\activate.bat
-
-# 安装依赖
 uv pip install -r config/requirements.txt
 ```
 
-> 也可以用传统方式：`python -m venv .venv` + `pip install -r config/requirements.txt`
+**2. API Key**
 
-### 2. 配置环境变量
+Set in `config/.env`:
+```
+DEEPSEEK_API_KEY=your_deepseek_api_key_here
+```
 
-在 `config/` 目录下创建 `.env` 文件：
+**3. Create User**
+
+```bash
+scripts/adduser.sh     # Linux/macOS
+scripts\adduser.bat    # Windows
+```
+
+**4. Start Services**
+
+```bash
+# One-click
+scripts/start.sh       # Linux/macOS
+scripts\start.bat      # Windows
+
+# Manual (3 terminals)
+python src/time.py         # Scheduler
+python src/mainagent.py    # Agent + MCP tools
+python src/front.py        # Web UI
+```
+
+Visit http://127.0.0.1:51209 after startup.
+
+### Public Deployment (Optional)
+
+One-click exposure via Cloudflare Tunnel (see [Highlight #3](#3-one-click-public-deployment) for details):
+```bash
+python scripts/tunnel.py
+# Or interactively via run.sh — prompts "Deploy to public network? (y/N)"
+```
+Auto-downloads `cloudflared`, starts tunnels for Web UI + Bark push, captures public URLs, and writes them to `.env`. No account or DNS setup required.
+
+---
+
+## API Reference
+
+### OpenAI-Compatible Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/v1/chat/completions` | POST | Chat completions (streaming/non-streaming), fully OpenAI-compatible |
+| `/login` | POST | User login authentication |
+| `/sessions` | POST | List user sessions |
+| `/session_history` | POST | Get session history |
+
+### OASIS Forum Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/topics` | POST | Create discussion topic |
+| `/topics` | GET | List all topics |
+| `/topics/{id}` | GET | Get topic details |
+| `/topics/{id}/stream` | GET | SSE real-time update stream |
+| `/topics/{id}/conclusion` | GET | Block until conclusion ready |
+| `/experts` | GET | List experts (public + user custom) |
+| `/experts/user` | POST/PUT/DELETE | User custom expert CRUD |
+
+---
+
+## Authentication
+
+- **Password Storage**: SHA-256 hash only, no plaintext on disk
+- **Session Management**: Flask signed Cookie, `sessionStorage` expires on tab close
+- **Request Verification**: Every `/ask` re-verifies password
+- **Internal Auth**: Inter-service communication via `INTERNAL_TOKEN` (auto-generated 64-char hex)
+- **User Isolation**: Conversation memory, file storage, custom experts all isolated by `user_id`
+
+---
+
+## Project Structure
+
+```
+mini_timebot/
+├── run.sh / run.bat               # One-click run
+├── scripts/                       # Env setup, start, tunnel, user management
+├── packaging/                     # Windows exe / macOS DMG packaging
+├── config/
+│   ├── .env                       # API keys and env vars
+│   ├── requirements.txt           # Python dependencies
+│   └── users.json                 # Username-password hash
+├── data/
+│   ├── agent_memory.db            # Conversation memory (SQLite)
+│   ├── prompts/                   # System prompts + expert configs
+│   │   ├── oasis_experts.json     # 10 public expert definitions
+│   │   ├── oasis_expert_discuss.txt  # Expert discussion prompt template
+│   │   └── oasis_summary.txt     # Conclusion generation prompt template
+│   ├── schedules/                 # YAML schedule examples
+│   ├── oasis_user_experts/        # User custom experts (per-user JSON)
+│   ├── timeset/                   # Scheduled task persistence
+│   └── user_files/                # User files (isolated per user)
+├── src/
+│   ├── mainagent.py               # OpenAI-compatible API + Agent core
+│   ├── agent.py                   # LangGraph workflow + tool orchestration
+│   ├── front.py                   # Flask Web UI
+│   ├── time.py                    # Scheduling center
+│   └── mcp_*.py                   # 6 MCP tool services
+├── oasis/
+│   ├── server.py                  # OASIS FastAPI service
+│   ├── engine.py                  # Discussion engine (rounds + consensus + conclusion)
+│   ├── experts.py                 # Expert definitions + user expert storage
+│   ├── scheduler.py               # YAML schedule parsing & execution
+│   ├── forum.py                   # Forum data structures
+│   └── models.py                  # Pydantic models
+├── tools/
+│   └── gen_password.py            # Password hash generator
+└── test/
+    ├── chat.py                    # CLI test client
+    └── view_history.py            # View chat history
+```
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| LLM | DeepSeek (`deepseek-chat`) |
+| Agent Framework | LangGraph + LangChain |
+| Tool Protocol | MCP (Model Context Protocol) |
+| Backend | FastAPI + Flask |
+| Auth | SHA-256 Hash + Flask Session |
+| Scheduling | APScheduler |
+| Persistence | SQLite (aiosqlite) |
+| Frontend | Tailwind CSS + Marked.js + Highlight.js |
+
+## License
+
+MIT License
+
+---
+
+<a id="中文"></a>
+
+# Mini TimeBot
+
+**[English](#english) | [中文](#中文)**
+
+> **OpenAI 兼容的 AI Agent，内置可编程多专家协作引擎，支持一键部署到公网。**
+
+Mini TimeBot 对外暴露标准 `/v1/chat/completions` 接口，可以被任何 OpenAI 兼容客户端直接调用；对内集成 **OASIS 智能编排引擎**——通过 YAML 调度定义，灵活组合专家角色、发言顺序和协作模式，将复杂问题拆解为多视角辩论、投票共识、自动总结的完整流程。
+
+## 核心亮点
+
+### 1. OpenAI 兼容 API
+
+```bash
+curl http://127.0.0.1:51200/v1/chat/completions \
+  -H "Authorization: Bearer <user>:<password>" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"mini-timebot","messages":[{"role":"user","content":"你好"}],"stream":true}'
+```
+
+- 完全兼容 OpenAI Chat Completions 格式，支持流式/非流式响应
+- 支持多轮对话、图片输入（Vision）、音频输入、文件上传、TTS
+- 可被 ChatBox、Open WebUI、Cursor 等任何 OpenAI 兼容客户端直接接入
+- 多用户 + 多会话隔离，SQLite 持久化对话记忆
+
+### 2. OASIS 智能编排——可编程的专家协作引擎
+
+**这是整个项目的核心设计。**
+
+传统的多 Agent 系统要么全部并行、要么固定流水线，无法灵活应对不同场景。OASIS 引擎通过一份简洁的 **YAML 调度定义**，让用户（或 AI Agent 自身）能精确编排专家协作的每一个环节：
+
+```yaml
+# 示例：先让创意和批判两位专家交锋，再让所有人总结
+version: 1
+repeat: true
+plan:
+  - expert: "创意专家"           # 单人顺序发言
+  - expert: "批判专家"           # 紧接着反驳
+  - parallel:                    # 多人并行发言
+      - "经济学家"
+      - "法学家"
+  - all_experts: true            # 所有参与者同时发言
+```
+
+#### 三层可控性
+
+| 维度 | 控制方式 | 说明 |
+|------|----------|------|
+| **谁参与** | `expert_tags` | 从 10+ 内置专家 + 用户自定义专家池中选人 |
+| **怎么讨论** | `schedule_yaml` | 4 种步骤类型自由组合（顺序 / 并行 / 全员 / 手动注入） |
+| **多深入** | `max_rounds` + `use_bot_session` | 控制轮次深度，可选有状态（记忆+工具）或无状态（轻量快速） |
+
+#### 四种调度步骤
+
+| 步骤类型 | 格式 | 效果 |
+|----------|------|------|
+| `expert` | `- expert: "专家名"` | 单个专家顺序发言 |
+| `parallel` | `- parallel: ["A", "B"]` | 多个专家同时并行发言 |
+| `all_experts` | `- all_experts: true` | 所有选中专家同时发言 |
+| `manual` | `- manual: {author: "主持人", content: "..."}` | 注入固定内容（不经过 LLM） |
+
+设置 `repeat: true` 时，调度计划每轮循环执行；`repeat: false` 则按步骤顺序执行一次后结束。
+
+#### 专家池
+
+**10 位内置公共专家**：
+
+| 专家 | Tag | 温度 | 定位 |
+|------|-----|------|------|
+| 🎨 创意专家 | `creative` | 0.9 | 发现机遇，提出前瞻性想法 |
+| 🔍 批判专家 | `critical` | 0.3 | 发现风险漏洞，严谨质疑 |
+| 📊 数据分析师 | `data` | 0.5 | 数据驱动，用事实说话 |
+| 🎯 综合顾问 | `synthesis` | 0.5 | 综合各方，提出务实方案 |
+| 📈 经济学家 | `economist` | 0.5 | 宏观/微观经济视角 |
+| ⚖️ 法学家 | `lawyer` | 0.3 | 合规性与法律风险 |
+| 💰 成本限制者 | `cost_controller` | 0.4 | 预算敏感，降本增效 |
+| 📊 收益规划者 | `revenue_planner` | 0.6 | 收益最大化策略 |
+| 🚀 创新企业家 | `entrepreneur` | 0.8 | 从 0 到 1 的实战视角 |
+| 🧑 普通人 | `common_person` | 0.7 | 接地气的常识反馈 |
+
+**用户自定义专家**：每个用户可通过 Agent 创建私有专家（定义名称、tag、persona、温度），与公共专家混合使用，按用户隔离。
+
+#### 讨论机制
+
+每位专家每轮：
+1. **发帖** — 200 字以内的观点，可标注回复某个已有帖子
+2. **投票** — 对其他帖子投 up/down
+
+引擎自动执行：
+- **共识检测** — 最高票帖子获得 ≥70% 专家赞成 → 提前结束
+- **结论生成** — 综合 Top 5 高赞帖子，LLM 生成最终总结
+
+#### 两种专家运行模式
+
+| 模式 | `use_bot_session` | 特点 |
+|------|-------------------|------|
+| **无状态**（默认） | `False` | 轻量快速，每轮独立调 LLM，无记忆无工具 |
+| **有状态** | `True` | 每位专家创建持久 session，有记忆、能调用搜索/文件/代码执行等全部工具，session 可在前端查看和继续对话 |
+
+### 3. 一键部署到公网
+
+一条命令将整个服务暴露到互联网——**零配置、无需账户**：
+
+```bash
+python scripts/tunnel.py
+```
+
+- 使用 **Cloudflare Quick Tunnel**，自动获取临时 `*.trycloudflare.com` 域名
+- 全自动流程：检测平台 → 下载 `cloudflared`（若缺失）→ 启动隧道 → 捕获公网地址 → 写入 `.env`
+- 同时暴露 **Web UI**（端口 51209）和 **Bark 推送服务**（端口 58010）
+- 也可通过 `run.sh` 交互启动（提示"是否部署到公网？y/N"）
+- 推送通知的点击跳转地址自动配置——用户还可通过 AI 对话自行覆盖
+
+#### 双向 OASIS 能力
+
+Agent 同时具备"主动召集"和"被邀参与"两种角色：
+
+| | 🏠 内部 OASIS（主动召集） | 🌐 外部 OASIS（被邀参与） |
+|---|---|---|
+| **发起方** | Agent 调用 `post_to_oasis` | 外部系统通过 OpenAI 兼容 API 发送消息 |
+| **参与者** | 本地专家池 | 多个独立 Agent 节点 |
+| **触发** | 用户提问 → Agent 自主决策 | 外部请求通过 `/v1/chat/completions` |
+| **结果** | 结论直接返回用户 | Agent 意见以标准 OpenAI 格式返回 |
+
+---
+
+## 架构概览
+
+```
+浏览器 (聊天 UI + 登录页 + OASIS 论坛面板)
+    │  HTTP :51209
+    ▼
+front.py (Flask + Session)     ── 前端代理，渲染登录/聊天页面，管理会话凭证
+    │  HTTP :51200
+    ▼
+mainagent.py (FastAPI + LangGraph)  ── OpenAI 兼容 API + 核心 Agent
+    │  stdio (MCP)                      （外部 OASIS 同样通过 OpenAI API 接入）
+    ├── mcp_scheduler.py   ── 闹钟/定时任务管理
+    │       │  HTTP :51201
+    │       ▼
+    ├── time.py (APScheduler)  ── 定时调度中心
+    ├── mcp_search.py      ── DuckDuckGo 联网搜索
+    ├── mcp_filemanager.py ── 用户文件管理（沙箱隔离）
+    ├── mcp_oasis.py       ── OASIS 多专家讨论 + 专家管理
+    │       │  HTTP :51202
+    │       ▼
+    │   oasis/server.py    ── OASIS 论坛服务（调度引擎 + 专家池）
+    ├── mcp_bark.py        ── Bark 手机推送通知
+    └── mcp_commander.py   ── 安全沙箱命令/代码执行
+```
+
+### 服务端口
+
+| 服务 | 端口 | 说明 |
+|------|------|------|
+| `front.py` | 51209 | Web UI（登录 + 聊天 + OASIS 面板） |
+| `mainagent.py` | 51200 | OpenAI 兼容 API + Agent 核心 |
+| `time.py` | 51201 | 定时任务调度中心 |
+| `oasis/server.py` | 51202 | OASIS 论坛服务 |
+
+> 端口可在 `config/.env` 中自定义。
+
+### MCP 工具集
+
+Agent 通过 MCP 协议集成 6 个工具服务，所有工具的 `username` 参数由系统自动注入，用户间完全隔离：
+
+| 工具服务 | 能力 |
+|----------|------|
+| **搜索** | DuckDuckGo 联网搜索 |
+| **定时任务** | 自然语言设置闹钟/提醒，Cron 表达式 |
+| **文件管理** | 用户文件 CRUD，路径穿越防护 |
+| **命令执行** | 安全沙箱中运行 Shell 命令和 Python 代码 |
+| **OASIS 论坛** | 发起讨论、查看进展、管理自定义专家 |
+| **Bark 推送** | 向 iOS/macOS 设备发送推送通知 |
+
+---
+
+## 快速开始
+
+### 一键运行（推荐）
+
+```bash
+# Linux / macOS
+chmod +x run.sh
+./run.sh
+
+# Windows
+run.bat
+```
+
+脚本自动完成：环境配置 → API Key 配置 → 创建用户 → 启动全部服务。
+
+> 以下为手动分步操作说明，使用 `run.sh` / `run.bat` 可跳过。
+
+### 手动配置
+
+**1. 环境配置**
+
+```bash
+# 自动（推荐）
+scripts/setup_env.sh   # Linux/macOS
+scripts\setup_env.bat  # Windows
+
+# 手动
+uv venv .venv --python 3.11
+source .venv/bin/activate
+uv pip install -r config/requirements.txt
+```
+
+**2. 配置 API Key**
+
+在 `config/.env` 中设置：
 
 ```
 DEEPSEEK_API_KEY=your_deepseek_api_key_here
 ```
 
-### 3. 创建用户账号
-
-使用脚本创建用户（交互式输入用户名和密码）：
+**3. 创建用户**
 
 ```bash
-# Linux / macOS（首次使用需赋予执行权限）
-chmod +x scripts/adduser.sh
-scripts/adduser.sh
-
-# Windows
-scripts\adduser.bat
+scripts/adduser.sh     # Linux/macOS
+scripts\adduser.bat    # Windows
 ```
 
-该工具会将用户名和密码的 SHA-256 哈希写入 `config/users.json`。可多次运行以添加多个用户。
-
-配置文件格式参考 `config/users.json.example`：
-
-```json
-{
-    "Xavier_01": "sha256哈希值（用 python tools/gen_password.py 生成）"
-}
-```
-
-### 4. 启动服务
-
-**一键启动（推荐）：**
+**4. 启动服务**
 
 ```bash
-# Linux / macOS（首次使用需赋予执行权限）
-chmod +x scripts/start.sh
-scripts/start.sh
+# 一键启动
+scripts/start.sh       # Linux/macOS
+scripts\start.bat      # Windows
 
-# Windows
-scripts\start.bat
+# 手动分别启动（3 个终端）
+python src/time.py         # 定时调度
+python src/mainagent.py    # Agent + MCP 工具
+python src/front.py        # Web UI
 ```
 
-Linux 按 `Ctrl+C` 停止所有服务；Windows 按任意键停止。
+启动后访问 http://127.0.0.1:51209 登录使用。
 
-**手动分别启动**（需 3 个终端）：
+### 公网部署（可选）
 
-```bash
-# 终端 1：启动定时调度中心
-python src/time.py
-
-# 终端 2：启动 AI Agent（会自动拉起 MCP 子进程）
-python src/mainagent.py
-
-# 终端 3：启动前端 Web UI
-python src/front.py
-```
-
-启动后访问 http://127.0.0.1:51209，输入用户名和密码登录后即可使用聊天界面。
-
-#### 终止智能体回复
-
-在 AI 正在回复时，发送按钮会自动切换为红色**「终止」**按钮。点击后：
-
-- 立即停止输出，已生成的内容保留在气泡中
-- 后端同步中断 LLM 调用，不再消耗 token 额度
-- 已输出的部分回复会保存到对话记忆（末尾标记"⚠️ 回复被用户终止"）
-- 可以立即发送新问题，不会与上一轮冲突
-
-也可以使用命令行客户端进行测试：
+通过 Cloudflare Tunnel 一键暴露到公网（详见[亮点 #3](#3-一键部署到公网)）：
 
 ```bash
-python test/chat.py
-```
-
-### 5. 公网部署（可选）
-
-通过 Cloudflare Tunnel 将本地服务一键暴露到公网，无需域名、无需备案，适合临时分享或远程访问。
-
-**集成在一键运行中：**
-
-`run.sh` / `run.bat` 启动服务前会询问"是否部署到公网？"，选择 `y` 即自动完成。
-
-**单独使用：**
-
-```bash
-# Linux / macOS
-bash scripts/tunnel.sh
-
-# Windows
-scripts\tunnel.bat
-
-# 或直接
 python scripts/tunnel.py
+# 或通过 run.sh 交互启动——提示"是否部署到公网？(y/N)"
 ```
+自动下载 `cloudflared`，启动 Web UI + Bark 推送双隧道，捕获公网地址写入 `.env`，无需账户或 DNS 配置。
 
-脚本会自动：
-1. 检测是否已安装 `cloudflared`（检查 `bin/` 目录和系统 PATH）
-2. 未找到时自动下载到 `bin/` 目录（支持 Linux/macOS + amd64/arm64）
-3. 启动 Cloudflare Tunnel，分配一个 `https://xxx.trycloudflare.com` 临时公网地址
-4. 打印公网地址，按 `Ctrl+C` 关闭隧道
+---
 
-> 每次启动分配的公网地址不同（免费隧道特性）。`bin/` 目录已被 `.gitignore` 排除。
+## API 参考
 
-## OASIS 论坛系统
-
-OASIS（Open AI System for Intelligent Synthesis）是一个多专家并行讨论系统，用于复杂问题的多角度分析。
-
-### 小组组会 & 学术会议
-
-Agent 同时具备两种 OASIS 讨论能力，就像一位研究员既参加**实验室内部的小组组会**，也出席**跨团队的学术研讨会**——两者并行存在、互不冲突：
-
-**🏠 小组组会（内部 OASIS）**：Agent 在本地召开组会——用户抛出一个问题，Agent 自己的专家团（4 位角色各异的专家）围坐讨论、互相投票，最终形成组内共识返回给用户。整个过程自产自销，像课题组的日常周会。
-
-**🌐 学术会议（外部 OASIS）**：Agent 受邀参加外部学术研讨会——会议主办方（外部 OASIS 系统）向多个独立 Agent 节点发出邀请，每个 Agent 阅读其他与会者的发言后发表自己的见解，最终由主办方汇总所有专家意见形成会议结论。Agent 只贡献自己的视角，不控制讨论流程。
-
-| | 🏠 小组组会（内部 OASIS） | 🌐 学术会议（外部 OASIS） |
-|---|---|---|
-| **发起方** | Agent 主动召集 | 外部 OASIS 系统邀请参与 |
-| **参与者** | 本地 4 位专家（创意、批判、数据、综合） | 多个独立 Agent 节点，各自代表不同视角 |
-| **讨论范围** | 组内闭门讨论，自给自足 | 开放协作，不同 Agent 各自独立思考后汇聚观点 |
-| **触发方式** | 用户提问 → Agent 调用 `post_to_oasis` | 外部系统调用 `POST /oasis/ask` |
-| **结果归属** | 结论直接返回给用户 | Agent 意见返回给外部 OASIS，由其汇总 |
-
-两种能力同时就绪：Agent 既能随时为用户召开组会深度分析问题，也能随时响应外部邀请、作为专家出席跨节点的学术研讨。
-
-### 功能特点
-
-- **多专家讨论**：4 位不同角色的专家并行分析问题
-- **投票机制**：专家互相评价，高赞观点权重更高
-- **共识检测**：达成共识后可提前结束，节省 token
-- **自动总结**：综合高赞观点生成最终结论
-
-### 专家角色
-
-| 专家 | 角色 | 温度 | 特点 |
-|------|------|------|------|
-| 🎨 创意专家 | 乐观创新者 | 0.9 | 提出前瞻性想法，挑战传统观念 |
-| 🔍 批判专家 | 严谨思考者 | 0.3 | 发现风险漏洞，指出潜在问题 |
-| 📊 数据分析师 | 数据驱动 | 0.5 | 用数字和事实支撑观点 |
-| 🎯 综合顾问 | 平衡协调 | 0.5 | 综合各方观点，提出务实建议 |
-
-### 使用方式
-
-**通过聊天界面：**
-
-用户可以直接向 Agent 提问，Agent 会判断是否需要使用 OASIS 进行多专家讨论：
-
-```
-用户：请分析一下在大语言模型应用中如何有效减少 token 消耗？
-Agent：我将启动 OASIS 论坛，邀请多位专家进行讨论...
-       [自动调用 post_to_oasis 工具]
-       🏛️ OASIS 论坛讨论完成
-       主题: 在大语言模型应用中如何有效减少 token 消耗...
-       📋 结论: [专家讨论的综合结论]
-```
-
-**通过 Web 界面：**
-
-右侧 OASIS 面板实时显示讨论进度：
-- 话题列表：显示所有讨论话题及状态
-- 详情视图：点击话题查看完整讨论过程
-- 实时更新：讨论进行中自动刷新帖子
-
-### 讨论流程
-
-```
-话题创建 → 后台任务启动 → 第1轮：专家并行发言
-    ↓
-第2轮：专家阅读他人帖子 → 发表观点 → 投票
-    ↓
-共识检查（高赞帖子 ≥ 70% 赞成票）→ 提前结束 / 继续下一轮
-    ↓
-生成结论（综合前 5 高赞帖子）
-```
-
-### API 端点
+### OpenAI 兼容端点
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/topics` | POST | 创建新讨论话题 |
+| `/v1/chat/completions` | POST | 聊天补全（流式/非流式），完全兼容 OpenAI 格式 |
+| `/login` | POST | 用户登录认证 |
+| `/sessions` | POST | 列出用户会话 |
+| `/session_history` | POST | 获取会话历史 |
+
+### OASIS 论坛端点
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/topics` | POST | 创建讨论话题 |
 | `/topics` | GET | 列出所有话题 |
-| `/topics/{id}` | GET | 获取话题详情（帖子列表） |
+| `/topics/{id}` | GET | 获取话题详情 |
 | `/topics/{id}/stream` | GET | SSE 实时更新流 |
-| `/topics/{id}/conclusion` | GET | 阻塞等待结论 |
-| `/experts` | GET | 列出所有专家配置 |
+| `/topics/{id}/conclusion` | GET | 阻塞等待讨论结论 |
+| `/experts` | GET | 列出专家（公共 + 用户自定义） |
+| `/experts/user` | POST/PUT/DELETE | 用户自定义专家 CRUD |
 
-### 外部 OASIS 接入
-
-除了 Agent 主动发起 OASIS 讨论之外，**外部 OASIS 系统也可以反向调用本 Agent 参与讨论**。外部系统通过 `POST /oasis/ask` 邀请 Agent 以专家身份加入多方讨论。
-
-**调用流程：**
-
-```
-外部 OASIS 系统 ── POST /oasis/ask ──► mainagent.py
-                                          │
-                                          ├─ 1. 增量提取历史消息（避免重复发送）
-                                          ├─ 2. 格式化为可读文本，构造系统触发消息
-                                          ├─ 3. Agent 思考并生成专家意见
-                                          └─ 4. 返回 Agent 的意见给外部 OASIS
-```
-
-**请求示例：**
-
-```bash
-curl -X POST http://127.0.0.1:51200/oasis/ask \
-  -H "Content-Type: application/json" \
-  -H "X-Internal-Token: <你的INTERNAL_TOKEN>" \
-  -d '{
-    "session_id": "oasis_abc123",
-    "topic": "AI是否应该具有情感",
-    "history": [
-      {"role": "创意专家", "content": "我认为AI具有情感可以更好地理解人类需求"},
-      {"role": "批判专家", "content": "但情感可能导致AI决策偏差，存在安全隐患"}
-    ],
-    "user_id": "oasis_external"
-  }'
-```
-
-**响应示例：**
-
-```json
-{
-  "content": "作为数据专家，我认为...",
-  "expert_name": "MiniTimeBot",
-  "status": "success"
-}
-```
-
-**关键特性：**
-
-| 特性 | 说明 |
-|------|------|
-| Token 鉴权 | 必须在请求头中携带 `X-Internal-Token`，否则返回 403 |
-| 增量历史 | 同一 `session_id` 多次调用时，只发送 Agent 还未见过的新消息 |
-| 会话隔离 | 外部 OASIS 讨论使用独立会话，不会污染用户的正常对话 |
-| 超时保护 | Agent 思考超过 120 秒自动返回超时响应 |
-
-## Bark 推送通知
-
-支持通过 [Bark](https://github.com/Finb/Bark) 向用户的 iOS / macOS 设备发送推送通知。当定时任务触发、重要事件发生时，Agent 可以主动推送提醒。
-
-### 配置方式
-
-1. 在 iPhone 上安装 Bark App，获取推送 Key
-2. 在聊天中告诉 Agent 你的 Bark Key，Agent 会自动调用 `set_push_key` 保存
-
-```
-用户：我的 Bark Key 是 xxxxxxxxxxxxxx，帮我配置推送
-Agent：已保存你的 Bark Key，现在可以向你发送推送通知了。
-```
-
-### 推送工具
-
-| 工具 | 说明 |
-|------|------|
-| `set_push_key` | 保存用户的 Bark Key |
-| `send_push_notification` | 发送推送通知到用户设备 |
-| `get_push_status` | 查看当前推送配置状态 |
-| `set_public_url` | 设置推送点击后的跳转地址（公网部署时使用） |
-| `get_public_url` | 查看当前公网地址配置 |
-| `clear_public_url` | 清除公网地址配置 |
-
-### 使用场景
-
-- **定时任务提醒**：闹钟触发时，Agent 自动发送推送通知到手机
-- **任务完成通知**：后台任务执行完毕后推送结果
-- **自定义推送**：用户可随时要求 Agent 发送推送测试
-
-> 推送工具的 `username` 参数由系统自动注入，每个用户的 Bark Key 独立存储、互不干扰。
+---
 
 ## 认证机制
 
-系统采用**密码认证 + 双层会话管理**，防止用户伪造身份。
+- **密码存储**：仅存 SHA-256 哈希值，明文不落盘
+- **会话管理**：Flask 签名 Cookie，`sessionStorage` 关闭标签页即失效
+- **请求验证**：每次 `/ask` 都重新验证密码
+- **内部鉴权**：服务间通信通过 `INTERNAL_TOKEN`（自动生成 64 字符 hex）
+- **用户隔离**：对话记忆、文件存储、自定义专家均按 `user_id` 隔离
 
-### 认证流程
-
-```
-用户输入用户名+密码
-    │
-    ▼
-前端 → POST /proxy_login → Flask 代理
-    │
-    ▼
-Flask → POST /login → FastAPI (mainagent.py)
-    │  SHA-256(password) 与 config/users.json 中的哈希比对
-    ▼
-验证成功 → Flask Session 记录凭证 → 返回登录成功
-    │
-    ▼
-每次聊天 → Flask /proxy_ask → 从 Session 取凭证 → FastAPI /ask (每次重新验证)
-```
-
-### 安全设计
-
-| 特性 | 说明 |
-|------|------|
-| 密码存储 | 仅存储 SHA-256 哈希值，明文密码不落盘 |
-| 传输安全 | 生产环境通过 Nginx 反向代理提供 HTTPS 加密 |
-| 会话管理 | Flask 签名 Cookie，`secret_key` 随机生成，防篡改 |
-| 前端状态 | 使用 `sessionStorage`，关闭标签页即失效 |
-| 请求验证 | 每次 `/ask` 请求都重新验证密码，防止 Session 劫持后长期有效 |
-| 用户隔离 | 对话记忆、文件存储均按 `user_id` 隔离 |
-| 内部端点鉴权 | `/system_trigger`、`/oasis/ask`、`/tools` 等内部端点通过 `X-Internal-Token` 请求头校验，防止外部伪造 |
-| Token 自动生成 | `INTERNAL_TOKEN` 首次启动时自动生成 64 字符随机 hex 密钥，写入 `.env`，无需手动配置 |
-| Swagger 文档 | 生产环境下 `/docs`、`/redoc`、`/openapi.json` 均已关闭，不暴露 API 结构 |
-
-### 相关文件
-
-| 文件 | 说明 |
-|------|------|
-| `config/users.json` | 用户名-密码哈希配置（不纳入版本控制） |
-| `config/users.json.example` | 配置格式示例 |
-| `tools/gen_password.py` | 交互式密码哈希生成工具 |
+---
 
 ## 项目结构
 
 ```
 mini_timebot/
-├── LICENSE
-├── README.md
-├── run.sh                     # 一键运行 (Linux / macOS)
-├── run.bat                    # 一键运行 (Windows)
-├── scripts/                   # 脚本集中目录
-│   ├── setup_env.sh           # 自动环境配置 (Linux / macOS)
-│   ├── setup_env.bat          # 自动环境配置 (Windows)
-│   ├── start.sh               # 一键启动 (Linux / macOS)
-│   ├── start.bat              # 一键启动 (Windows)
-│   ├── adduser.sh             # 添加用户 (Linux / macOS)
-│   ├── adduser.bat            # 添加用户 (Windows)
-│   ├── setup_apikey.sh        # API Key 配置 (Linux / macOS)
-│   ├── setup_apikey.bat       # API Key 配置 (Windows)
-│   ├── tunnel.py              # Cloudflare Tunnel 公网部署（自动下载 cloudflared + 启动隧道）
-│   ├── tunnel.sh              # 公网部署 Shell 包装 (Linux / macOS)
-│   ├── tunnel.bat             # 公网部署 Bat 包装 (Windows)
-│   └── launcher.py            # 跨平台启动器（管理子进程生命周期）
-├── packaging/                 # 打包发布相关
-│   ├── launcher.py            # exe 启动器源码（调用 run.bat）
-│   ├── build.py               # PyInstaller 打包脚本（Windows）
-│   ├── build_dmg.sh           # macOS .app + DMG 打包脚本
-│   ├── icon.png               # 应用图标源文件
-│   └── installer.iss          # Inno Setup 安装包脚本（Windows）
+├── run.sh / run.bat               # 一键运行
+├── scripts/                       # 环境配置、启动、隧道、用户管理脚本
+├── packaging/                     # Windows exe / macOS DMG 打包
 ├── config/
-│   ├── .env               # 环境变量配置（需自行创建，不纳入版本控制）
-│   ├── requirements.txt   # Python 依赖列表
-│   ├── users.json         # 用户名-密码哈希（需用 gen_password.py 生成，不纳入版本控制）
-│   └── users.json.example # 用户配置格式示例
+│   ├── .env                       # API Key 等环境变量
+│   ├── requirements.txt           # Python 依赖
+│   └── users.json                 # 用户名-密码哈希
 ├── data/
-│   ├── agent_memory.db    # Agent 对话记忆数据库（运行时自动生成）
-│   ├── timeset/
-│   │   └── tasks.json     # 定时任务持久化存储（JSON，可手动编辑）
-│   └── user_files/        # 用户文件存储目录（按用户名隔离，运行时自动生成）
-│       └── <username>/    # 各用户的独立文件空间
+│   ├── agent_memory.db            # 对话记忆（SQLite）
+│   ├── prompts/                   # 系统提示词 + 专家配置
+│   │   ├── oasis_experts.json     # 10 位公共专家定义
+│   │   ├── oasis_expert_discuss.txt  # 专家讨论 prompt 模板
+│   │   └── oasis_summary.txt     # 结论生成 prompt 模板
+│   ├── schedules/                 # YAML 调度示例
+│   ├── oasis_user_experts/        # 用户自定义专家（per-user JSON）
+│   ├── timeset/                   # 定时任务持久化
+│   └── user_files/                # 用户文件（按用户隔离）
 ├── src/
-│   ├── front.py           # 前端 Web UI（登录页 + 聊天页 + Session 管理 + OASIS 面板）
-│   ├── mainagent.py       # 核心 AI Agent（含认证逻辑 + 外部 OASIS 接入端点）
-│   ├── agent.py           # Agent 核心逻辑（LangGraph 工作流 + 系统提示词）
-│   ├── mcp_scheduler.py   # MCP 工具服务（定时任务）
-│   ├── mcp_search.py      # MCP 搜索服务（联网搜索）
-│   ├── mcp_filemanager.py # MCP 文件服务（用户文件管理）
-│   ├── mcp_oasis.py       # MCP OASIS 服务（多专家讨论接口）
-│   ├── mcp_bark.py        # MCP 推送服务（Bark 通知推送）
-│   ├── mcp_commander.py   # MCP 指令执行服务（命令/代码执行）
-│   └── time.py            # 定时任务调度中心
-├── oasis/                  # OASIS 论坛模块
-│   ├── __init__.py        # 模块初始化
-│   ├── server.py          # FastAPI 服务（独立端口 51202）
-│   ├── engine.py          # 讨论引擎（轮次管理、共识检查、结论生成）
-│   ├── forum.py           # 论坛数据结构（帖子、投票、线程安全）
-│   ├── experts.py         # 专家 Agent 定义（4 种角色）
-│   └── models.py          # Pydantic 数据模型
+│   ├── mainagent.py               # OpenAI 兼容 API + Agent 核心
+│   ├── agent.py                   # LangGraph 工作流 + 工具编排
+│   ├── front.py                   # Flask Web UI
+│   ├── time.py                    # 定时调度中心
+│   └── mcp_*.py                   # 6 个 MCP 工具服务
+├── oasis/
+│   ├── server.py                  # OASIS FastAPI 服务
+│   ├── engine.py                  # 讨论引擎（轮次 + 共识 + 结论）
+│   ├── experts.py                 # 专家定义 + 用户专家存储
+│   ├── scheduler.py               # YAML 调度解析与执行
+│   ├── forum.py                   # 论坛数据结构
+│   └── models.py                  # Pydantic 模型
 ├── tools/
-│   └── gen_password.py    # 密码哈希生成工具
+│   └── gen_password.py            # 密码哈希生成
 └── test/
-    ├── chat.py            # 命令行测试客户端
-    └── view_history.py    # 查看历史聊天记录
+    ├── chat.py                    # 命令行测试客户端
+    └── view_history.py            # 查看历史聊天记录
 ```
-
-### 目录说明
-
-**`config/`** — 配置文件目录
-
-- `.env`：API 密钥配置，需手动创建：
-  ```
-  DEEPSEEK_API_KEY=your_deepseek_api_key_here
-  ```
-- `users.json`：用户认证配置，存储 `{用户名: SHA-256哈希}` 键值对，由 `tools/gen_password.py` 生成。
-
-以上文件均已被 `.gitignore` 排除，不会提交到版本库。
-
-**`data/`** — 运行时数据目录
-
-- `agent_memory.db`：SQLite 数据库，由 LangGraph 的 `AsyncSqliteSaver` 自动创建，用于持久化对话历史。包含 `checkpoints` 和 `writes` 两张表，以 `thread_id`（用户 ID）区分不同用户的对话记录。
-- `timeset/tasks.json`：定时任务持久化文件，JSON 格式，重启后自动恢复。可直接编辑修改任务配置。
-- `user_files/`：用户文件存储目录，按用户名（`thread_id`）自动创建子目录，实现用户间文件隔离。
-
-**文件管理机制**
-
-Agent 通过 `mcp_filemanager.py` 提供文件管理能力，支持 5 个操作：
-
-| 工具 | 说明 |
-|------|------|
-| `list_files` | 列出当前用户的所有文件 |
-| `read_file` | 读取指定文件内容 |
-| `write_file` | 创建或覆盖写入文件 |
-| `append_file` | 向文件末尾追加内容 |
-| `delete_file` | 删除指定文件 |
-
-用户身份通过 `UserAwareToolNode` 自动注入：LLM 调用工具时不需要传递 `username` 参数，系统从 LangGraph 的 `config.thread_id` 中读取用户 ID 并自动填充，确保用户只能操作自己的文件且无法伪造身份。
-
-**`tools/`** — 管理工具
-
-| 脚本 | 说明 | 用法 |
-|------|------|------|
-| `gen_password.py` | 交互式创建用户，生成密码哈希并写入 `config/users.json` | `python tools/gen_password.py` |
-
-**`test/`** — 测试与辅助工具
-
-| 脚本 | 说明 | 用法 |
-|------|------|------|
-| `chat.py` | 命令行交互式聊天客户端，通过 HTTP 向 Agent 发送请求 | `python test/chat.py` |
-| `view_history.py` | 读取 `agent_memory.db`，查看历史聊天记录 | `python test/view_history.py [--user USER_ID] [--limit N]` |
-
-## 打包发布
-
-### Windows 安装包
-
-将项目打包为 Windows 安装包，用户双击桌面快捷方式即可运行（exe 本质是 `run.bat` 的启动器壳）。
-
-**打包步骤：**
-
-```bash
-# 1. 安装 PyInstaller
-pip install pyinstaller
-
-# 2. 打包 exe（生成 MiniTimeBot.exe 到项目根目录）
-python packaging/build.py
-
-# 3. 制作安装包（可选）
-#    用 Inno Setup 打开 packaging/installer.iss，点击编译
-#    生成 dist/MiniTimeBot_Setup_1.0.0.exe
-```
-
-安装包功能：
-- 创建桌面快捷方式和开始菜单项
-- 包含完整源码、脚本和配置模板
-- 安装后提示配置 API Key
-- 支持卸载
-
-> exe 仅作为 `run.bat` 的快捷方式入口，不改变任何业务逻辑。所有源码保持 `.py` 格式，可随时修改。
-
-### macOS 应用包（.app + DMG）
-
-将项目打包为标准的 macOS `.app` 应用包，并生成 `.dmg` 安装镜像。用户双击 `.app` 即可在终端中自动启动所有服务。
-
-**打包步骤：**
-
-```bash
-# 一键打包（在项目根目录执行）
-bash packaging/build_dmg.sh
-```
-
-脚本会自动完成以下流程：
-
-1. **构建 `.app` 应用包** — 创建标准 macOS 应用结构（`Contents/MacOS/launch` 启动器 + `Contents/Resources/` 项目文件 + `Info.plist` 元数据）
-2. **复制项目文件** — 将 `run.sh`、`scripts/`（仅 `.sh`）、`src/`、`tools/`、`config/` 模板等复制到 `Resources/`
-3. **生成应用图标** — 从 `packaging/icon.png` 自动生成 `.icns` 图标（使用 `sips` + `iconutil`）
-4. **创建 DMG 镜像** — 使用 `hdiutil` 生成带 Applications 快捷方式的 `.dmg` 安装镜像
-
-**产出物：**
-
-| 文件 | 路径 | 说明 |
-|------|------|------|
-| `.dmg` 安装镜像 | `dist/MiniTimeBot_1.0.0.dmg` | macOS 上打包时生成，可直接分发 |
-| `.tar.gz` 压缩包 | `dist/MiniTimeBot_1.0.0_macos.tar.gz` | 非 macOS 系统上打包时生成（替代 DMG） |
-
-**用户安装与使用：**
-
-1. 双击 `.dmg` 文件挂载磁盘镜像
-2. 将 `MiniTimeBot.app` 拖入「应用程序」文件夹
-3. 首次打开时如遇"无法验证开发者"提示：
-   - 右键点击 `.app` → 选择「打开」→ 确认「打开」
-   - 或在终端执行：`xattr -cr /Applications/MiniTimeBot.app`
-4. 之后双击图标即可启动，服务会在终端中运行
-5. 启动后访问 http://127.0.0.1:51209 使用
-
-**`.app` 内部结构：**
-
-```
-MiniTimeBot.app/
-└── Contents/
-    ├── Info.plist          ← 应用元数据（名称、版本、图标等）
-    ├── MacOS/
-    │   └── launch          ← 启动器脚本（通过 osascript 在 Terminal.app 中运行 run.sh）
-    └── Resources/          ← 完整项目文件
-        ├── run.sh
-        ├── scripts/
-        ├── src/
-        ├── tools/
-        ├── config/         ← 仅包含模板（.env.example, users.json.example, requirements.txt）
-        └── data/           ← 空目录结构，运行时自动填充
-```
-
-**注意事项：**
-- 打包脚本会自动检测运行平台：macOS 上生成 `.dmg`，其他系统生成 `.tar.gz`
-- 如需自定义图标，替换 `packaging/icon.png`（建议正方形 PNG，至少 512×512）
-- `.app` 本质是 `run.sh` 的包装，所有源码保持 `.py` 格式，可在 `Resources/` 中直接修改
-- 首次启动时 `run.sh` 会自动引导用户完成环境配置、API Key 设置和用户创建
 
 ## 技术栈
 
-- **LLM**: DeepSeek (`deepseek-chat`)
-- **Agent 框架**: LangGraph + LangChain
-- **工具协议**: MCP (Model Context Protocol)
-- **后端**: FastAPI + Flask
-- **认证**: SHA-256 密码哈希 + Flask 签名 Session
-- **定时调度**: APScheduler
-- **对话持久化**: SQLite (aiosqlite)
-- **前端**: Tailwind CSS + Marked.js + Highlight.js
+| 层面 | 技术 |
+|------|------|
+| LLM | DeepSeek (`deepseek-chat`) |
+| Agent 框架 | LangGraph + LangChain |
+| 工具协议 | MCP (Model Context Protocol) |
+| 后端 | FastAPI + Flask |
+| 认证 | SHA-256 哈希 + Flask Session |
+| 定时调度 | APScheduler |
+| 持久化 | SQLite (aiosqlite) |
+| 前端 | Tailwind CSS + Marked.js + Highlight.js |
 
 ## 许可证
 
