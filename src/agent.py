@@ -28,6 +28,9 @@ USER_INJECTED_TOOLS = {
     # Bark push notification tools
     "set_push_key", "send_push_notification", "get_push_status",
     "set_public_url", "get_public_url", "clear_public_url",
+    # OASIS forum tools
+    "post_to_oasis", "list_oasis_topics",
+    "list_oasis_experts", "add_oasis_expert", "update_oasis_expert", "delete_oasis_expert",
 }
 
 

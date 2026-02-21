@@ -2,6 +2,10 @@
 MCP Tool Server: OASIS Forum
 
 Exposes tools for the user's Agent to interact with the OASIS discussion forum:
+  - list_oasis_experts: List all available expert agents (public + user custom)
+  - add_oasis_expert: Create a custom expert for the user
+  - update_oasis_expert: Update a custom expert
+  - delete_oasis_expert: Delete a custom expert
   - post_to_oasis: Submit a question and wait for expert discussion conclusion
   - check_oasis_discussion: Check the current state of a discussion
   - list_oasis_topics: List all discussion topics
@@ -16,42 +20,288 @@ from mcp.server.fastmcp import FastMCP
 mcp = FastMCP("OASIS Forum")
 
 OASIS_BASE_URL = os.getenv("OASIS_BASE_URL", "http://127.0.0.1:51202")
+_FALLBACK_USER = os.getenv("MCP_OASIS_USER", "agent_user")
+
+_CONN_ERR = "❌ 无法连接 OASIS 论坛服务器。请确认 OASIS 服务已启动 (端口 51202)。"
+
+
+# ======================================================================
+# Expert management tools
+# ======================================================================
+
+@mcp.tool()
+async def list_oasis_experts(username: str = "") -> str:
+    """
+    List all available expert agents on the OASIS forum.
+    Shows both public (built-in) experts and the current user's custom experts.
+    Call this BEFORE post_to_oasis to see which experts can participate.
+
+    Args:
+        username: (auto-injected) current user identity; do NOT set manually
+
+    Returns:
+        Formatted list of experts with their tags, personas, and source (public/custom)
+    """
+    effective_user = username or _FALLBACK_USER
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                f"{OASIS_BASE_URL}/experts",
+                params={"user_id": effective_user},
+            )
+            if resp.status_code != 200:
+                return f"❌ 查询失败: {resp.text}"
+
+            experts = resp.json().get("experts", [])
+            if not experts:
+                return "📭 暂无可用专家"
+
+            public = [e for e in experts if e.get("source") == "public"]
+            custom = [e for e in experts if e.get("source") == "custom"]
+
+            lines = [f"🏛️ OASIS 可用专家 - 共 {len(experts)} 位\n"]
+
+            if public:
+                lines.append(f"📋 公共专家 ({len(public)} 位):")
+                for e in public:
+                    persona_preview = e["persona"][:60] + "..." if len(e["persona"]) > 60 else e["persona"]
+                    lines.append(f"  • {e['name']} (tag: \"{e['tag']}\") — {persona_preview}")
+
+            if custom:
+                lines.append(f"\n🔧 自定义专家 ({len(custom)} 位):")
+                for e in custom:
+                    persona_preview = e["persona"][:60] + "..." if len(e["persona"]) > 60 else e["persona"]
+                    lines.append(f"  • {e['name']} (tag: \"{e['tag']}\") — {persona_preview}")
+
+            lines.append(
+                "\n💡 用 expert_tags 选专家参与讨论，用 schedule_yaml 控制发言顺序。"
+                "\n   用 add_oasis_expert 创建自定义专家。"
+            )
+            return "\n".join(lines)
+
+    except httpx.ConnectError:
+        return _CONN_ERR
+    except Exception as e:
+        return f"❌ 查询异常: {str(e)}"
 
 
 @mcp.tool()
-async def post_to_oasis(question: str, max_rounds: int = 5) -> str:
+async def add_oasis_expert(
+    username: str,
+    name: str,
+    tag: str,
+    persona: str,
+    temperature: float = 0.7,
+) -> str:
+    """
+    Create a custom expert for the current user.
+    The expert will appear alongside public experts in list_oasis_experts
+    and can be selected via expert_tags in post_to_oasis.
+
+    Args:
+        username: (auto-injected) current user identity; do NOT set manually
+        name: Expert display name (e.g. "产品经理", "前端架构师")
+        tag: Unique identifier tag (e.g. "pm", "frontend_arch"). Must not conflict with existing tags.
+        persona: Expert persona description — defines how the expert thinks and speaks
+        temperature: LLM temperature (0.0-1.0, default 0.7). Lower = more deterministic.
+
+    Returns:
+        Confirmation with the created expert info
+    """
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{OASIS_BASE_URL}/experts/user",
+                json={
+                    "user_id": username,
+                    "name": name,
+                    "tag": tag,
+                    "persona": persona,
+                    "temperature": temperature,
+                },
+            )
+            if resp.status_code != 200:
+                return f"❌ 创建失败: {resp.json().get('detail', resp.text)}"
+
+            expert = resp.json()["expert"]
+            return (
+                f"✅ 自定义专家已创建\n"
+                f"  名称: {expert['name']}\n"
+                f"  Tag: {expert['tag']}\n"
+                f"  Persona: {expert['persona']}\n"
+                f"  Temperature: {expert['temperature']}"
+            )
+
+    except httpx.ConnectError:
+        return _CONN_ERR
+    except Exception as e:
+        return f"❌ 创建异常: {str(e)}"
+
+
+@mcp.tool()
+async def update_oasis_expert(
+    username: str,
+    tag: str,
+    name: str = "",
+    persona: str = "",
+    temperature: float = -1,
+) -> str:
+    """
+    Update an existing custom expert. Only user-created experts can be updated (not public ones).
+
+    Args:
+        username: (auto-injected) current user identity; do NOT set manually
+        tag: The tag of the custom expert to update (immutable, used as identifier)
+        name: New display name (leave empty to keep current)
+        persona: New persona description (leave empty to keep current)
+        temperature: New temperature (-1 = keep current)
+
+    Returns:
+        Confirmation with the updated expert info
+    """
+    try:
+        body: dict = {"user_id": username}
+        if name:
+            body["name"] = name
+        if persona:
+            body["persona"] = persona
+        if temperature >= 0:
+            body["temperature"] = temperature
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.put(
+                f"{OASIS_BASE_URL}/experts/user/{tag}",
+                json=body,
+            )
+            if resp.status_code != 200:
+                return f"❌ 更新失败: {resp.json().get('detail', resp.text)}"
+
+            expert = resp.json()["expert"]
+            return (
+                f"✅ 自定义专家已更新\n"
+                f"  名称: {expert['name']}\n"
+                f"  Tag: {expert['tag']}\n"
+                f"  Persona: {expert['persona']}\n"
+                f"  Temperature: {expert['temperature']}"
+            )
+
+    except httpx.ConnectError:
+        return _CONN_ERR
+    except Exception as e:
+        return f"❌ 更新异常: {str(e)}"
+
+
+@mcp.tool()
+async def delete_oasis_expert(username: str, tag: str) -> str:
+    """
+    Delete a custom expert. Only user-created experts can be deleted (not public ones).
+
+    Args:
+        username: (auto-injected) current user identity; do NOT set manually
+        tag: The tag of the custom expert to delete
+
+    Returns:
+        Confirmation of deletion
+    """
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.delete(
+                f"{OASIS_BASE_URL}/experts/user/{tag}",
+                params={"user_id": username},
+            )
+            if resp.status_code != 200:
+                return f"❌ 删除失败: {resp.json().get('detail', resp.text)}"
+
+            deleted = resp.json()["deleted"]
+            return f"✅ 已删除自定义专家: {deleted['name']} (tag: \"{deleted['tag']}\")"
+
+    except httpx.ConnectError:
+        return _CONN_ERR
+    except Exception as e:
+        return f"❌ 删除异常: {str(e)}"
+
+
+# ======================================================================
+# Discussion tools
+# ======================================================================
+
+@mcp.tool()
+async def post_to_oasis(
+    question: str,
+    username: str = "",
+    expert_tags: list[str] = [],
+    max_rounds: int = 5,
+    schedule_yaml: str = "",
+    schedule_file: str = "",
+    use_bot_session: bool = False,
+) -> str:
     """
     Submit a question to the OASIS forum for multi-expert discussion.
-    Expert agents will debate the question in parallel, vote on each other's posts,
+    Expert agents will debate the question, vote on each other's posts,
     and produce a comprehensive conclusion.
-    
+
     Use this tool for complex questions that benefit from multiple perspectives,
     such as strategy analysis, pros/cons evaluation, or controversial topics.
 
+    **Workflow**: call list_oasis_experts first to see available experts (including custom ones),
+    then use expert_tags and schedule_yaml to control who participates and in what order.
+
     Args:
         question: The question or topic to discuss
+        username: (auto-injected) current user identity; do NOT set manually
+        expert_tags: List of expert tags to include (e.g. ["creative", "critical", "my_custom_tag"]).
+            Empty list = all experts (public + custom) participate.
         max_rounds: Maximum number of discussion rounds (1-20, default 5)
-    
+        schedule_yaml: Inline YAML to control speaking order per round.
+            If omitted, all selected experts speak in parallel each round.
+            Format:
+              version: 1
+              repeat: true
+              plan:
+                - expert: "创意专家"
+                - expert: "批判专家"
+                - parallel:
+                    - "数据分析师"
+                    - "经济学家"
+                - all_experts: true
+            Step types:
+              - expert: single expert speaks (use expert NAME, not tag)
+              - parallel: multiple experts speak simultaneously (use NAMEs)
+              - all_experts: all selected experts speak
+            repeat: true = repeat the plan each round; false = execute plan steps once across rounds
+        schedule_file: Path to a YAML schedule file (alternative to schedule_yaml)
+        use_bot_session: If True, experts use full bot sessions (stateful, with tool-calling
+            ability and memory across rounds). Default False uses lightweight stateless LLM calls.
+
     Returns:
         The final conclusion summarizing the expert discussion
     """
+    effective_user = username or _FALLBACK_USER
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(timeout=300.0)) as client:
-            # Step 1: Create topic
+            body = {
+                "question": question,
+                "user_id": effective_user,
+                "max_rounds": max_rounds,
+            }
+            if expert_tags:
+                body["expert_tags"] = expert_tags
+            if schedule_yaml:
+                body["schedule_yaml"] = schedule_yaml
+            if schedule_file:
+                body["schedule_file"] = schedule_file
+            if use_bot_session:
+                body["use_bot_session"] = True
+
             resp = await client.post(
                 f"{OASIS_BASE_URL}/topics",
-                json={
-                    "question": question,
-                    "user_id": "agent_user",
-                    "max_rounds": max_rounds,
-                },
+                json=body,
             )
             if resp.status_code != 200:
                 return f"❌ Failed to create topic: {resp.text}"
 
             topic_id = resp.json()["topic_id"]
 
-            # Step 2: Wait for conclusion (blocking)
             result = await client.get(
                 f"{OASIS_BASE_URL}/topics/{topic_id}/conclusion",
                 params={"timeout": 280},
@@ -73,7 +323,7 @@ async def post_to_oasis(question: str, max_rounds: int = 5) -> str:
                 return f"❌ 获取结论失败: {result.text}"
 
     except httpx.ConnectError:
-        return "❌ 无法连接 OASIS 论坛服务器。请确认 OASIS 服务已启动 (端口 51202)。"
+        return _CONN_ERR
     except Exception as e:
         return f"❌ 工具调用异常: {str(e)}"
 
@@ -110,7 +360,6 @@ async def check_oasis_discussion(topic_id: str) -> str:
                 "--- 最近帖子 ---",
             ]
 
-            # Show last 10 posts
             for p in data["posts"][-10:]:
                 prefix = f"  ↳回复#{p['reply_to']}" if p.get("reply_to") else "📌"
                 content_preview = p["content"][:150]
@@ -129,27 +378,27 @@ async def check_oasis_discussion(topic_id: str) -> str:
             return "\n".join(lines)
 
     except httpx.ConnectError:
-        return "❌ 无法连接 OASIS 论坛服务器。请确认 OASIS 服务已启动 (端口 51202)。"
+        return _CONN_ERR
     except Exception as e:
         return f"❌ 查询异常: {str(e)}"
 
 
 @mcp.tool()
-async def list_oasis_topics(user_id: str = "") -> str:
+async def list_oasis_topics(username: str = "") -> str:
     """
     List all discussion topics on the OASIS forum.
 
     Args:
-        user_id: Optional filter by user ID. Leave empty to list all.
-    
+        username: (auto-injected) current user identity; leave empty to list all.
+
     Returns:
         Formatted list of all discussion topics
     """
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             params = {}
-            if user_id:
-                params["user_id"] = user_id
+            if username:
+                params["user_id"] = username
             resp = await client.get(f"{OASIS_BASE_URL}/topics", params=params)
 
             if resp.status_code != 200:
@@ -175,7 +424,7 @@ async def list_oasis_topics(user_id: str = "") -> str:
             return "\n".join(lines)
 
     except httpx.ConnectError:
-        return "❌ 无法连接 OASIS 论坛服务器。请确认 OASIS 服务已启动 (端口 51202)。"
+        return _CONN_ERR
     except Exception as e:
         return f"❌ 查询异常: {str(e)}"
 

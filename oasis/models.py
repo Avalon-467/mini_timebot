@@ -20,6 +20,10 @@ class CreateTopicRequest(BaseModel):
     user_id: str = "anonymous"
     max_rounds: int = Field(default=5, ge=1, le=20)
     expert_tags: list[str] = []  # Empty = all experts participate
+    schedule_yaml: Optional[str] = None  # Inline YAML schedule string
+    schedule_file: Optional[str] = None  # Path to YAML schedule file
+    use_bot_session: bool = False  # True = experts use bot sessions (stateful, with tools)
+    bot_enabled_tools: Optional[list[str]] = None  # Tool whitelist for bot session experts
 
 
 class PostInfo(BaseModel):

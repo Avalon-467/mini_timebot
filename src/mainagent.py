@@ -648,13 +648,20 @@ async def get_session_history(req: SessionHistoryRequest):
 
 
 @app.post("/delete_session")
-async def delete_session(req: DeleteSessionRequest):
+async def delete_session(
+    req: DeleteSessionRequest,
+    x_internal_token: str | None = Header(None),
+):
     """删除指定会话或用户的全部会话历史。
 
     - session_id 非空：删除该用户的指定会话
     - session_id 为空：删除该用户的所有会话
+
+    认证：用户密码 或 INTERNAL_TOKEN (via X-Internal-Token header)
     """
-    if not verify_password(req.user_id, req.password):
+    # 支持内部 token 认证（OASIS 专家 session 清理使用）
+    internal_auth = x_internal_token and x_internal_token == INTERNAL_TOKEN
+    if not internal_auth and not verify_password(req.user_id, req.password):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     try:
@@ -849,8 +856,10 @@ def _auth_openai_request(req: ChatCompletionRequest, auth_header: str | None):
     支持格式：
     1. Authorization: Bearer <user_id>:<password>
     2. Authorization: Bearer <user_id>:<password>:<session_id>
-    3. Authorization: Bearer <INTERNAL_TOKEN>
-    4. 请求体中的 user + password 字段
+    3. Authorization: Bearer <INTERNAL_TOKEN>                — 内部调用，user_id 取 req.user 或 "system"
+    4. Authorization: Bearer <INTERNAL_TOKEN>:<user_id>      — 管理员级，以指定用户身份操作
+    5. Authorization: Bearer <INTERNAL_TOKEN>:<user_id>:<session_id>  — 同上，附带 session 覆盖
+    6. 请求体中的 user + password 字段
     返回 (user_id, authenticated, session_override)
     """
     user_id = req.user
@@ -860,12 +869,24 @@ def _auth_openai_request(req: ChatCompletionRequest, auth_header: str | None):
     if auth_header and auth_header.startswith("Bearer "):
         token = auth_header[7:]
         parts = token.split(":")
+
+        # Check if first part is the INTERNAL_TOKEN (admin-level auth)
+        if parts[0] == INTERNAL_TOKEN:
+            if len(parts) >= 3:
+                # INTERNAL_TOKEN:user_id:session_id
+                return parts[1], True, parts[2]
+            elif len(parts) == 2:
+                # INTERNAL_TOKEN:user_id
+                return parts[1], True, None
+            else:
+                # INTERNAL_TOKEN alone
+                return user_id or "system", True, None
+
+        # Normal user auth: user_id:password[:session_id]
         if len(parts) >= 3:
             user_id, password, session_override = parts[0], parts[1], parts[2]
         elif len(parts) == 2:
             user_id, password = parts[0], parts[1]
-        elif token == INTERNAL_TOKEN:
-            return user_id or "system", True, None
 
     if not user_id or not password:
         return None, False, None
@@ -884,7 +905,9 @@ async def openai_chat_completions(
     认证方式（任选其一）：
     - Header: Authorization: Bearer <user_id>:<password>
     - Header: Authorization: Bearer <user_id>:<password>:<session_id>
-    - Header: Authorization: Bearer <INTERNAL_TOKEN>  (内部服务通信)
+    - Header: Authorization: Bearer <INTERNAL_TOKEN>                (内部调用，user="system")
+    - Header: Authorization: Bearer <INTERNAL_TOKEN>:<user_id>      (管理员级，以指定用户身份)
+    - Header: Authorization: Bearer <INTERNAL_TOKEN>:<user_id>:<session_id>  (同上+session)
     - Body: user + password 字段
 
     请求格式完全兼容 OpenAI API，扩展字段通过顶层或 extra_body 传入：

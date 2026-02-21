@@ -19,6 +19,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 import uvicorn
 
 from dotenv import load_dotenv
@@ -107,6 +108,11 @@ async def create_topic(req: CreateTopicRequest):
     engine = DiscussionEngine(
         forum=forum,
         expert_tags=req.expert_tags or None,
+        schedule_yaml=req.schedule_yaml,
+        schedule_file=req.schedule_file,
+        use_bot_session=req.use_bot_session,
+        bot_enabled_tools=req.bot_enabled_tools,
+        user_id=req.user_id,
     )
     engines[topic_id] = engine
 
@@ -258,15 +264,66 @@ async def get_conclusion(topic_id: str, timeout: int = 300):
 
 
 @app.get("/experts")
-async def list_experts():
-    """List all available expert agents on this forum."""
-    from oasis.experts import EXPERT_CONFIGS
+async def list_experts(user_id: str = ""):
+    """List all available expert agents (public + user custom)."""
+    from oasis.experts import get_all_experts
+    configs = get_all_experts(user_id or None)
     return {
         "experts": [
-            {"name": c["name"], "tag": c["tag"], "persona": c["persona"]}
-            for c in EXPERT_CONFIGS
+            {
+                "name": c["name"],
+                "tag": c["tag"],
+                "persona": c["persona"],
+                "source": c.get("source", "public"),
+            }
+            for c in configs
         ]
     }
+
+
+# ------------------------------------------------------------------
+# User custom expert CRUD
+# ------------------------------------------------------------------
+
+class UserExpertRequest(BaseModel):
+    user_id: str
+    name: str = ""
+    tag: str = ""
+    persona: str = ""
+    temperature: float = 0.7
+
+
+@app.post("/experts/user")
+async def add_user_expert_route(req: UserExpertRequest):
+    """Add a custom expert for a user."""
+    from oasis.experts import add_user_expert
+    try:
+        expert = add_user_expert(req.user_id, req.model_dump())
+        return {"status": "ok", "expert": expert}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.put("/experts/user/{tag}")
+async def update_user_expert_route(tag: str, req: UserExpertRequest):
+    """Update an existing custom expert by tag."""
+    from oasis.experts import update_user_expert
+    try:
+        expert = update_user_expert(req.user_id, tag, req.model_dump())
+        return {"status": "ok", "expert": expert}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/experts/user/{tag}")
+async def delete_user_expert_route(tag: str, user_id: str):
+    """Delete a custom expert by tag."""
+    from oasis.experts import delete_user_expert
+    try:
+        deleted = delete_user_expert(user_id, tag)
+        return {"status": "ok", "deleted": deleted}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # --- Entrypoint ---
