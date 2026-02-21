@@ -36,9 +36,12 @@ def _get_summarizer() -> ChatOpenAI:
     api_key = os.getenv("LLM_API_KEY")
     if not api_key:
         raise ValueError("LLM_API_KEY not found in environment variables.")
+    base_url = os.getenv("LLM_BASE_URL", "https://api.deepseek.com").strip()
+    # ChatOpenAI 需要 /v1 路径
+    openai_base = base_url.rstrip("/") + "/v1"
     return ChatOpenAI(
         model=os.getenv("LLM_MODEL", "deepseek-chat"),
-        base_url=os.getenv("LLM_BASE_URL", "https://api.deepseek.com"),
+        base_url=openai_base,
         api_key=api_key,
         temperature=0.3,
         max_tokens=2048,
