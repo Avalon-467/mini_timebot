@@ -235,11 +235,20 @@ else:
 
 # 服务配置：(提示信息, 脚本路径, 启动后等待秒数)
 services = [
-    (f"⏰ [1/4] 启动定时调度中心 (port {PORT_SCHEDULER})...", "src/time.py", 2),
-    (f"🏛️ [2/4] 启动 OASIS 论坛服务 (port {PORT_OASIS})...", "oasis/server.py", 2),
-    (f"🤖 [3/4] 启动 AI Agent (port {PORT_AGENT})...", "src/mainagent.py", 3),
-    (f"🌐 [4/4] 启动前端 Web UI (port {PORT_FRONTEND})...", "src/front.py", 1),
+    (f"⏰ [1/5] 启动定时调度中心 (port {PORT_SCHEDULER})...", "src/time.py", 2),
+    (f"🏛️ [2/5] 启动 OASIS 论坛服务 (port {PORT_OASIS})...", "oasis/server.py", 2),
+    (f"🤖 [3/5] 启动 AI Agent (port {PORT_AGENT})...", "src/mainagent.py", 3),
 ]
+
+# Chatbot 启动
+chatbot_setup = os.path.join(PROJECT_ROOT, "chatbot", "setup.py")
+if os.path.exists(chatbot_setup):
+    print(f"💬 [4/5] 启动聊天机器人...")
+    chatbot_dir = os.path.join(PROJECT_ROOT, "chatbot")
+    subprocess.run([venv_python, "setup.py"], cwd=chatbot_dir)
+    services.append((f"🌐 [5/5] 启动前端 Web UI (port {PORT_FRONTEND})...", "src/front.py", 1))
+else:
+    services.append((f"🌐 [4/4] 启动前端 Web UI (port {PORT_FRONTEND})...", "src/front.py", 1))
 
 for msg, script, wait_time in services:
     print(msg)

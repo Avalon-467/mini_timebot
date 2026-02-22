@@ -53,4 +53,5 @@ MiniTimeBot.exe
 
 test/
 !test/chat.py
-!test/view_history.py
+!test/view_history.
+chatbot/logs

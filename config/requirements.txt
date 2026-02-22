@@ -18,3 +18,12 @@ aiosqlite
 langgraph-checkpoint-sqlite
 ddgs
 pymupdf
+
+# Chatbot dependencies
+qq-botpy
+python-telegram-bot
+aiohttp
+aiohttp_socks
+pilk
+pydub
+av
