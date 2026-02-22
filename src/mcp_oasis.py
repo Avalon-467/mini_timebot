@@ -425,8 +425,9 @@ async def dispatch_subagent(
         task: The work task description for the sub-agent (be specific and detailed)
         username: (auto-injected) current user identity; do NOT set manually
         enabled_tools: Optional tool whitelist for the sub-agent. Empty = all tools available.
-        notify_session: Session ID where the main agent should receive the completion notification.
-            Defaults to "default" (the user's main chat session).
+        notify_session: (auto-injected) Session ID where the main agent should receive the
+            completion notification. Defaults to current session. Override to route
+            notifications to a different session (e.g. for cross-session workflows).
 
     Returns:
         Confirmation with topic_id for tracking progress

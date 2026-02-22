@@ -32,6 +32,15 @@ USER_INJECTED_TOOLS = {
     # OASIS forum tools
     "post_to_oasis", "list_oasis_topics", "dispatch_subagent",
     "list_oasis_experts", "add_oasis_expert", "update_oasis_expert", "delete_oasis_expert",
+    # Session management tools
+    "list_sessions", "get_current_session",
+}
+
+# Tools that need session_id auto-injected (in addition to username)
+SESSION_INJECTED_TOOLS = {
+    "add_alarm": "session_id",
+    "dispatch_subagent": "notify_session",
+    "get_current_session": "current_session_id",
 }
 
 
@@ -84,9 +93,11 @@ class UserAwareToolNode:
             else:
                 if tc["name"] in USER_INJECTED_TOOLS:
                     tc["args"]["username"] = user_id
-                # 给 add_alarm 额外注入 session_id，让闹钟记住设置时的会话
-                if tc["name"] == "add_alarm":
-                    tc["args"]["session_id"] = state.get("session_id") or "default"
+                # Auto-inject session_id for tools that need it (only if not already set by LLM)
+                if tc["name"] in SESSION_INJECTED_TOOLS:
+                    param_name = SESSION_INJECTED_TOOLS[tc["name"]]
+                    if not tc["args"].get(param_name):
+                        tc["args"][param_name] = state.get("session_id") or "default"
                 allowed_calls.append(tc)
                 print(f">>> [tools] ✅ 调用工具: {tc['name']}")
 
@@ -270,6 +281,11 @@ class MiniTimeAgent:
             "bark_service": {
                 "command": "python",
                 "args": [os.path.join(self._src_dir, "mcp_bark.py")],
+                "transport": "stdio",
+            },
+            "session_service": {
+                "command": "python",
+                "args": [os.path.join(self._src_dir, "mcp_session.py")],
                 "transport": "stdio",
             },
         })
