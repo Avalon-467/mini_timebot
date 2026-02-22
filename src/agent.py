@@ -29,6 +29,8 @@ USER_INJECTED_TOOLS = {
     # Bark push notification tools
     "set_push_key", "send_push_notification", "get_push_status",
     "set_public_url", "get_public_url", "clear_public_url",
+    # Telegram push notification tools
+    "set_telegram_chat_id", "send_telegram_message", "get_telegram_status",
     # OASIS forum tools
     "post_to_oasis", "list_oasis_topics", "dispatch_subagent",
     "list_oasis_experts", "add_oasis_expert", "update_oasis_expert", "delete_oasis_expert",
@@ -41,6 +43,7 @@ SESSION_INJECTED_TOOLS = {
     "add_alarm": "session_id",
     "dispatch_subagent": "notify_session",
     "get_current_session": "current_session_id",
+    "send_telegram_message": "source_session",
 }
 
 
@@ -286,6 +289,11 @@ class MiniTimeAgent:
             "session_service": {
                 "command": "python",
                 "args": [os.path.join(self._src_dir, "mcp_session.py")],
+                "transport": "stdio",
+            },
+            "telegram_service": {
+                "command": "python",
+                "args": [os.path.join(self._src_dir, "mcp_telegram.py")],
                 "transport": "stdio",
             },
         })
