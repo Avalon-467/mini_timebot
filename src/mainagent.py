@@ -982,13 +982,29 @@ async def openai_chat_completions(
         input_messages = tool_result_messages
     else:
         # 正常模式：取最后一条 user message
+        # 同时收集请求中的 system messages（如 BotSessionExpert 的指令上下文）
+        system_parts = []
+        for msg in req.messages:
+            if msg.role == "system" and msg.content:
+                system_parts.append(msg.content if isinstance(msg.content, str) else str(msg.content))
+
         for msg in reversed(req.messages):
             if msg.role == "user":
                 last_user_msg = msg
                 break
         if not last_user_msg:
             raise HTTPException(status_code=400, detail="messages 中缺少 user 或 tool 消息")
-        input_messages = [_openai_msg_to_human_message(last_user_msg)]
+
+        human_msg = _openai_msg_to_human_message(last_user_msg)
+        # 将 system messages 内容前置到 user message 中
+        if system_parts:
+            sys_text = "\n".join(system_parts)
+            if isinstance(human_msg.content, list):
+                # 多模态消息：在开头插入 text part
+                human_msg.content.insert(0, {"type": "text", "text": f"[来自调度方的指令]\n{sys_text}\n\n---\n"})
+            else:
+                human_msg.content = f"[来自调度方的指令]\n{sys_text}\n\n---\n{human_msg.content}"
+        input_messages = [human_msg]
 
     user_input = {
         "messages": input_messages,

@@ -402,6 +402,81 @@ async def check_oasis_discussion(topic_id: str) -> str:
 
 
 @mcp.tool()
+async def dispatch_subagent(
+    task: str,
+    username: str = "",
+    enabled_tools: list[str] = [],
+    notify_session: str = "default",
+) -> str:
+    """
+    Quickly dispatch a single sub-agent to complete a task in the background.
+
+    This is a lightweight shortcut that creates a one-expert OASIS session running as
+    a bot sub-agent. The task is submitted in **detach mode** — it returns immediately
+    and the sub-agent works autonomously. When done, the main agent receives a
+    system_trigger notification in the specified session with the conclusion.
+
+    Use this when:
+      - You want to offload a time-consuming task (research, data processing, etc.)
+      - The task can be described in a single prompt
+      - You don't need multi-expert debate, just one capable agent with tools
+
+    Args:
+        task: The work task description for the sub-agent (be specific and detailed)
+        username: (auto-injected) current user identity; do NOT set manually
+        enabled_tools: Optional tool whitelist for the sub-agent. Empty = all tools available.
+        notify_session: Session ID where the main agent should receive the completion notification.
+            Defaults to "default" (the user's main chat session).
+
+    Returns:
+        Confirmation with topic_id for tracking progress
+    """
+    effective_user = username or _FALLBACK_USER
+    port = os.getenv("PORT_AGENT", "51200")
+    callback_url = f"http://127.0.0.1:{port}/system_trigger"
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout=30.0)) as client:
+            body = {
+                "question": task,
+                "user_id": effective_user,
+                "max_rounds": 1,
+                "expert_tags": [],
+                "use_bot_session": True,
+                "callback_url": callback_url,
+                "callback_session_id": notify_session,
+            }
+            if enabled_tools:
+                body["bot_enabled_tools"] = enabled_tools
+
+            # Use a minimal single-expert schedule: one "all_experts" step
+            # OASIS will use whatever experts are available; with max_rounds=1
+            # and a single round, it's effectively a single-shot sub-agent.
+
+            resp = await client.post(
+                f"{OASIS_BASE_URL}/topics",
+                json=body,
+            )
+            if resp.status_code != 200:
+                return f"❌ 子 Agent 创建失败: {resp.text}"
+
+            topic_id = resp.json()["topic_id"]
+
+            return (
+                f"🚀 子 Agent 已派遣（后台运行中）\n"
+                f"任务: {task[:100]}\n"
+                f"Topic ID: {topic_id}\n"
+                f"完成后将自动通知会话: {notify_session}\n\n"
+                f"💡 可用 check_oasis_discussion(topic_id=\"{topic_id}\") 查看进展。"
+            )
+
+    except httpx.ConnectError:
+        return _CONN_ERR
+    except Exception as e:
+        return f"❌ 派遣失败: {str(e)}"
+
+
+@mcp.tool()
 async def list_oasis_topics(username: str = "") -> str:
     """
     List all discussion topics on the OASIS forum.

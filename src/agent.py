@@ -30,7 +30,7 @@ USER_INJECTED_TOOLS = {
     "set_push_key", "send_push_notification", "get_push_status",
     "set_public_url", "get_public_url", "clear_public_url",
     # OASIS forum tools
-    "post_to_oasis", "list_oasis_topics",
+    "post_to_oasis", "list_oasis_topics", "dispatch_subagent",
     "list_oasis_experts", "add_oasis_expert", "update_oasis_expert", "delete_oasis_expert",
 }
 
@@ -150,6 +150,7 @@ class MiniTimeAgent:
         prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "prompts")
         prompt_files = {
             "base_system": "base_system.txt",
+            "base_system_subagent": "base_system_subagent.txt",
             "system_trigger": "system_trigger.txt",
             "tool_status": "tool_status.txt",
         }
@@ -372,23 +373,36 @@ class MiniTimeAgent:
         all_names = sorted(t.name for t in all_tools)
         all_tool_list_str = ", ".join(all_names)
 
-        base_prompt = (
-            self._prompts["base_system"] + "\n\n"
-            f"【默认可用工具列表】\n{all_tool_list_str}\n"
-            "以上工具默认全部启用。如果后续有工具状态变更，系统会另行通知。\n"
-        )
+        # 判断是否为 subagent 会话（session_id 以 "oasis_" 开头）
+        session_id = state.get("session_id", "")
+        is_subagent = session_id.startswith("oasis_") if session_id else False
+
+        if is_subagent:
+            # Subagent 模式：精简 prompt，无用户画像/技能，只列工具
+            base_prompt = (
+                self._prompts["base_system_subagent"] + "\n\n"
+                f"【可用工具列表】\n{all_tool_list_str}\n"
+            )
+        else:
+            base_prompt = (
+                self._prompts["base_system"] + "\n\n"
+                f"【默认可用工具列表】\n{all_tool_list_str}\n"
+                "以上工具默认全部启用。如果后续有工具状态变更，系统会另行通知。\n"
+            )
 
         # Detect tool state change
         current_enabled = frozenset(enabled_names) if enabled_names is not None else frozenset(all_names)
         user_id = state.get("user_id", "__global__")
 
-        # 注入用户专属画像
-        user_profile = self._get_user_profile(user_id)
-        if user_profile:
-            base_prompt += f"\n{user_profile}\n"
+        # 仅主 agent 会话注入用户画像和技能列表
+        if not is_subagent:
+            # 注入用户专属画像
+            user_profile = self._get_user_profile(user_id)
+            if user_profile:
+                base_prompt += f"\n{user_profile}\n"
 
-        # 注入用户技能列表（总是显示位置信息）
-        base_prompt += self._get_user_skills(user_id) + "\n"
+            # 注入用户技能列表（总是显示位置信息）
+            base_prompt += self._get_user_skills(user_id) + "\n"
 
         last_state = self._user_last_tool_state.get(user_id)
 

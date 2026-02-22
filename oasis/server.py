@@ -20,6 +20,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+import httpx
 import uvicorn
 
 from dotenv import load_dotenv
@@ -73,7 +74,7 @@ app = FastAPI(
 # Background task runner
 # ------------------------------------------------------------------
 async def _run_discussion(topic_id: str, engine: DiscussionEngine):
-    """Run a discussion engine in the background."""
+    """Run a discussion engine in the background, then fire callback if configured."""
     try:
         await engine.run()
     except Exception as e:
@@ -82,6 +83,34 @@ async def _run_discussion(topic_id: str, engine: DiscussionEngine):
         if forum:
             forum.status = "error"
             forum.conclusion = f"讨论出错: {str(e)}"
+
+    # Fire callback notification to main agent if configured
+    cb_url = getattr(engine, "callback_url", None)
+    if cb_url:
+        forum = discussions.get(topic_id)
+        conclusion = forum.conclusion if forum else "（无结论）"
+        status = forum.status if forum else "error"
+        cb_session = getattr(engine, "callback_session_id", "default") or "default"
+        user_id = forum.user_id if forum else "anonymous"
+        internal_token = os.getenv("INTERNAL_TOKEN", "")
+
+        text = (
+            f"[OASIS 子任务完成通知]\n"
+            f"Topic ID: {topic_id}\n"
+            f"状态: {status}\n"
+            f"主题: {forum.question if forum else '?'}\n\n"
+            f"📋 结论:\n{conclusion}"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.post(
+                    cb_url,
+                    json={"user_id": user_id, "text": text, "session_id": cb_session},
+                    headers={"X-Internal-Token": internal_token},
+                )
+            print(f"[OASIS] 📨 Callback sent for {topic_id} → {cb_session}")
+        except Exception as cb_err:
+            print(f"[OASIS] ⚠️ Callback failed for {topic_id}: {cb_err}")
 
 
 # ------------------------------------------------------------------
@@ -114,6 +143,9 @@ async def create_topic(req: CreateTopicRequest):
         bot_enabled_tools=req.bot_enabled_tools,
         user_id=req.user_id,
     )
+    # Attach callback info (used by _run_discussion after completion)
+    engine.callback_url = req.callback_url
+    engine.callback_session_id = req.callback_session_id
     engines[topic_id] = engine
 
     # Launch discussion as a background task (non-blocking)

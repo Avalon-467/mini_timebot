@@ -10,6 +10,26 @@ AI_API_KEY = os.getenv("AI_API_KEY")+":TG"
 AI_URL = os.getenv("AI_API_URL")
 AI_MODEL = os.getenv("AI_MODEL_TG")
 
+# 白名单：允许使用 Bot 的 Telegram 用户 ID 或用户名
+# 环境变量格式：逗号分隔，支持数字 ID 和 @username（不区分大小写）
+# 例：TELEGRAM_ALLOWED_USERS=123456789,987654321,@my_username
+# 留空或不设置则不限制（所有人可用）
+_raw_allowed = os.getenv("TELEGRAM_ALLOWED_USERS", "").strip()
+ALLOWED_USER_IDS: set[int] = set()
+ALLOWED_USERNAMES: set[str] = set()
+if _raw_allowed:
+    for item in _raw_allowed.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if item.startswith("@"):
+            ALLOWED_USERNAMES.add(item[1:].lower())
+        else:
+            try:
+                ALLOWED_USER_IDS.add(int(item))
+            except ValueError:
+                ALLOWED_USERNAMES.add(item.lower())
+
 import logging
 import httpx
 import base64
@@ -26,7 +46,30 @@ async def download_as_b64(file_id: str, context: ContextTypes.DEFAULT_TYPE) -> s
         response = await client.get(file.file_path)
         return base64.b64encode(response.content).decode('utf-8')
 
+def _is_user_allowed(update: Update) -> bool:
+    """检查用户是否在白名单中。白名单为空时允许所有人。"""
+    if not ALLOWED_USER_IDS and not ALLOWED_USERNAMES:
+        return True
+    user = update.effective_user
+    if not user:
+        return False
+    if user.id in ALLOWED_USER_IDS:
+        return True
+    if user.username and user.username.lower() in ALLOWED_USERNAMES:
+        return True
+    return False
+
+
 async def handle_multimodal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # 权限检查
+    if not _is_user_allowed(update):
+        user = update.effective_user
+        uid = user.id if user else "unknown"
+        uname = f"@{user.username}" if user and user.username else ""
+        logging.warning(f"Blocked unauthorized user: {uid} {uname}")
+        await update.message.reply_text("⛔ 你没有权限使用此机器人。")
+        return
+
     chat_id = update.effective_chat.id
     # 获取文字：Telegram 中媒体消息的文字在 caption，纯文字在 text
     user_text = update.message.caption or update.message.text or "请分析此内容"
@@ -100,4 +143,9 @@ if __name__ == '__main__':
 
     print("--- 机器人已启动 (轮询模式) ---")
     print("支持：文字 / 图片 / 语音 (OpenAI 多模态格式)")
+    if ALLOWED_USER_IDS or ALLOWED_USERNAMES:
+        parts = [str(i) for i in ALLOWED_USER_IDS] + [f"@{u}" for u in ALLOWED_USERNAMES]
+        print(f"🔒 白名单已启用，允许用户: {', '.join(parts)}")
+    else:
+        print("⚠️ 未设置 TELEGRAM_ALLOWED_USERS，所有人可访问")
     application.run_polling(drop_pending_updates=True)
