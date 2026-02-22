@@ -1,12 +1,7 @@
 import os
-import sys
 from dotenv import load_dotenv
-
-# Windows 控制台 UTF-8 编码
-if sys.platform == "win32":
-    sys.stdout.reconfigure(encoding="utf-8")
-    sys.stderr.reconfigure(encoding="utf-8")
-
+import static_ffmpeg
+static_ffmpeg.add_paths()
 # 加载 .env 文件
 load_dotenv()
 
@@ -30,7 +25,7 @@ import io
 import wave
 import base64
 import httpx
-import pilk
+import pysilk
 import aiohttp
 import asyncio
 from functools import wraps
@@ -79,7 +74,7 @@ class MyClient(botpy.Client):
 
             # 核心调用：decode(输入文件对象, 输出文件对象, 采样率)
             # 采样率 24000 是 QQ 语音的标准
-            pilk.decode(input_file, output_pcm, 24000)
+            pysilk.decode(input_file, output_pcm, 24000)
             
             # 从输出流获取原始 PCM 数据
             pcm_data = output_pcm.getvalue()
@@ -176,11 +171,11 @@ class MyClient(botpy.Client):
 
     # --- 触发器配置 ---
     async def on_c2c_message_create(self, message: C2CMessage):
-        print(f"📩 收到私聊: {message.author.user_openid}")
+        print(f" 收到私聊: {message.author.user_openid}")
         await self.handle_main_logic(message)
 
     async def on_group_at_message_create(self, message: GroupMessage):
-        print(f"👥 收到群聊 @ 消息")
+        print(f" 收到群聊 @ 消息")
         await self.handle_main_logic(message)
 
 if __name__ == "__main__":
@@ -189,5 +184,5 @@ if __name__ == "__main__":
     intents.value = (1 << 25) | (1 << 30) 
     
     client = MyClient(intents=intents)
-    print(f"🚀 机器人已启动！请确保外部 SSH 隧道 (1080) 正在运行...")
+    print(f"机器人已启动！请确保外部 SSH 隧道 (1080) 正在运行...")
     client.run(appid=QQ_CONF["appid"], secret=QQ_CONF["secret"])

@@ -55,3 +55,4 @@ test/
 !test/chat.py
 !test/view_history.
 chatbot/logs
+chatbot/botpy.log
