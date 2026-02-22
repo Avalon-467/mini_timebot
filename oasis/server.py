@@ -142,6 +142,7 @@ async def create_topic(req: CreateTopicRequest):
         use_bot_session=req.use_bot_session,
         bot_enabled_tools=req.bot_enabled_tools,
         user_id=req.user_id,
+        expert_configs=req.expert_configs,
     )
     # Attach callback info (used by _run_discussion after completion)
     engine.callback_url = req.callback_url

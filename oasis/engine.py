@@ -62,17 +62,23 @@ class DiscussionEngine:
         bot_base_url: str | None = None,
         bot_enabled_tools: list[str] | None = None,
         user_id: str = "anonymous",
+        expert_configs: list[dict] | None = None,
     ):
         self.forum = forum
         self.use_bot_session = use_bot_session
 
-        # Merge public + user custom experts, then filter by tag
-        all_configs = get_all_experts(user_id)
-        configs = all_configs
-        if expert_tags:
-            configs = [c for c in all_configs if c["tag"] in expert_tags]
-        if not configs:
-            configs = all_configs  # Fallback: use all if no match
+        # Determine expert configs: override > tag-filter > all
+        if expert_configs:
+            # Use directly provided configs (e.g. dispatch_subagent)
+            configs = expert_configs
+        else:
+            # Merge public + user custom experts, then filter by tag
+            all_configs = get_all_experts(user_id)
+            configs = all_configs
+            if expert_tags:
+                configs = [c for c in all_configs if c["tag"] in expert_tags]
+            if not configs:
+                configs = all_configs  # Fallback: use all if no match
 
         if use_bot_session:
             # Backend 2: each expert = a bot session owned by the requesting user

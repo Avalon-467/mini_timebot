@@ -24,6 +24,9 @@ class CreateTopicRequest(BaseModel):
     schedule_file: Optional[str] = None  # Path to YAML schedule file
     use_bot_session: bool = False  # True = experts use bot sessions (stateful, with tools)
     bot_enabled_tools: Optional[list[str]] = None  # Tool whitelist for bot session experts
+    # Override expert list: if provided, use these configs instead of loading from file
+    # Each item: {"name": "...", "persona": "...", "tag": "...", "temperature": 0.7}
+    expert_configs: Optional[list[dict]] = None
     # Callback: when discussion concludes, POST result to this URL via /system_trigger
     callback_url: Optional[str] = None  # e.g. "http://127.0.0.1:51200/system_trigger"
     callback_session_id: Optional[str] = None  # session to notify (default = "default")

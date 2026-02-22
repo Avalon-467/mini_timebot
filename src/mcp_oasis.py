@@ -445,6 +445,15 @@ async def dispatch_subagent(
                 "use_bot_session": True,
                 "callback_url": callback_url,
                 "callback_session_id": notify_session,
+                # Single anonymous agent — no preset persona, identity comes from the task
+                "expert_configs": [
+                    {
+                        "name": "子Agent",
+                        "tag": "_dispatch",
+                        "persona": "",
+                        "temperature": 0.7,
+                    }
+                ],
             }
             if enabled_tools:
                 body["bot_enabled_tools"] = enabled_tools

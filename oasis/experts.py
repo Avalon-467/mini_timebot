@@ -168,17 +168,34 @@ def _build_discuss_prompt(
     persona: str,
     question: str,
     posts_text: str,
-) -> str:
-    """Build the prompt that asks the expert to respond with JSON."""
-    if _DISCUSS_PROMPT_TPL:
+    split: bool = False,
+) -> str | tuple[str, str]:
+    """Build the prompt that asks the expert to respond with JSON.
+
+    Args:
+        split: If True, return (system_prompt, user_prompt) tuple for bot session mode.
+               If False, return a single combined string for direct LLM mode.
+    """
+    if _DISCUSS_PROMPT_TPL and not split:
         return _DISCUSS_PROMPT_TPL.format(
             expert_name=expert_name,
             persona=persona,
             question=question,
             posts_text=posts_text,
         )
-    return (
-        f"你是论坛专家「{expert_name}」。{persona}\n\n"
+
+    # --- Build system part (identity + behavior) ---
+    identity = f"你是论坛专家「{expert_name}」。{persona}" if persona else ""
+    sys_parts = [p for p in [
+        identity,
+        "在接下来的讨论中，你将收到论坛的新增内容，需要以 JSON 格式回复你的观点和投票。",
+        "你拥有工具调用能力，如需搜索资料、分析数据来支撑你的观点，可以使用可用的工具。",
+        "注意：后续轮次只会发送新增帖子，之前的帖子请参考你的对话记忆。",
+    ] if p]
+    system_prompt = "\n".join(sys_parts)
+
+    # --- Build user part (topic + forum content + JSON format) ---
+    user_prompt = (
         f"讨论主题: {question}\n\n"
         f"当前论坛内容:\n{posts_text}\n\n"
         "请以严格的 JSON 格式回复（不要包含 markdown 代码块标记，不要包含注释）:\n"
@@ -194,6 +211,12 @@ def _build_discuss_prompt(
         "- content: 你的发言内容，要有独到见解，可以赞同、反驳或补充你所回复的帖子\n"
         '- votes: 对其他帖子的投票列表，direction 只能是 "up" 或 "down"。如果没有要投票的帖子，填空列表 []\n'
     )
+
+    if split:
+        return system_prompt, user_prompt
+    else:
+        # Combined for direct LLM mode
+        return f"{system_prompt}\n\n{user_prompt}"
 
 
 def _format_posts(posts) -> str:
@@ -358,18 +381,11 @@ class BotSessionExpert:
         if not self._initialized:
             # ── First round: full context ──
             posts_text = _format_posts(others) if others else "(还没有其他人发言，你来开启讨论吧)"
-            prompt = _build_discuss_prompt(self.name, self.persona, forum.question, posts_text)
-
-            messages.append({
-                "role": "system",
-                "content": (
-                    f"你是论坛专家「{self.name}」。{self.persona}\n"
-                    "在接下来的讨论中，你将收到论坛的新增内容，需要以 JSON 格式回复你的观点和投票。\n"
-                    "你拥有工具调用能力，如需搜索资料、分析数据来支撑你的观点，可以使用可用的工具。\n"
-                    "注意：后续轮次只会发送新增帖子，之前的帖子请参考你的对话记忆。"
-                ),
-            })
-            messages.append({"role": "user", "content": prompt})
+            system_prompt, user_prompt = _build_discuss_prompt(
+                self.name, self.persona, forum.question, posts_text, split=True,
+            )
+            messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": user_prompt})
             self._initialized = True
         else:
             # ── Subsequent rounds: incremental delta only ──
